@@ -1,0 +1,79 @@
+Table 1: Project Efficiency using People Benefitted Scoring Criteria ,
+Criteria,Score
+"Greater than $77,000/person   1  ",1
+"$28,001 to $77,000/person   4  ",4
+"$15,001 to $28,000/person   6  ",6
+"$6,000 to $15,000/person   8 ",8
+"Less than $6,000/person   10",10
+,
+,
+Table 2: Project Efficiency using Structures Benefitted Scoring Criteria ,
+Criteria,Score
+"Greater than $261,000/structure   1  ",1
+"$106,001 to $261,000/structure   4  ",4
+"$60,001 to $106,000/structure  6  ",6
+"$23,000 to $60,000/structure   8  ",8
+"Less than $23,000/structure   10 ",10
+,
+,
+Table 3: Existing Conditions Scoring Criteria (Channel and Detention Projects) ,
+Criteria,Score
+System capacity is > 1% AEP storm (100-year storm),0
+System capacity is < 1% AEP storm (100-year storm),1
+System capacity is < 2% AEP storm (50-year storm)  2  ,2
+System capacity is < 4% AEP storm (25-year storm)  4  ,4
+System capacity is < 10% AEP storm (10-year storm)  ,6
+System capacity is < 20% AEP storm (5-year storm)  8  ,8
+System capacity is < 50% AEP storm (2-year storm)  10,10
+,
+,
+Table 4: Existing Conditions Scoring Criteria (Subdivision Drainage Improvement Projects),
+Criteria,Score
+Low estimated excess rainfall AND high-quality drainage infrastructure,0
+Intermediate estimated excess rainfall OR medium-quality drainage infrastructure (but not both) ,3
+Intermediate estimated excess rainfall AND medium-quality drainage infrastructure,6
+High estimated excess rainfall OR low-quality drainage infrastructure (but not both),9
+High estimated excess rainfall AND low-quality drainage infrastructure,10
+,
+,
+Table 5: Social Vulnerability Scoring Criteria  ,
+Criteria,Score
+SVI indicates low level of vulnerability,1
+SVI indicates low to moderate level of vulnerability,4
+SVI indicates moderate to high level of vulnerability,7
+SVI indicates high level of vulnerability,10
+,
+,
+Table 6: Long Term Maintenance Costs Scoring Criteria  ,
+Criteria,Score
+Project will require extensive or specialized maintenance,2
+Project will require maintenance outside of District's or jurisdiction’s regular maintenance practices  ,6
+"Project only requires regular, on-going maintenance",10
+,
+,
+Table 7: Minimize Environmental Impacts Scoring Criteria (Channel and Detention Projects),
+Criteria,Score
+Project will have significant environmental impacts requiring a Corps of Engineers Individual Permit and mitigation bank credits  ,0
+Project will have significant environmental impacts requiring mitigation bank credits   ,2
+Project is able to significantly avoid environmental impacts,6
+Project has minimal or no environmental impacts,10
+,
+,
+Table 8: Minimize Environmental Impacts Scoring Criteria (Subdivision Drainage Improvement Projects),
+Criteria,Score
+Project will require acquiring additional right-of-way ,6
+Project can be completed within the road’s existing right-of-way ,10
+,
+,
+Table 9: Potential for Multiple Benefits Scoring Criteria (Channel and Detention Projects) ,
+Criteria,Score
+Project does not have multiple benefits,0
+Project has recreational benefits,4
+Project has environmental enhancement benefits,6
+Project has recreational and environmental enhancement benefits,10
+,
+,
+Table 10: Potential for Multiple Benefits Scoring Criteria (Subdivision Drainage Improvement Projects),
+Criteria,Score
+Project area does not benefit from a District improvement such as a nearby channel improvement or detention basin project ,6
+Project area also benefits from a District improvement such as a nearby channel improvement or detention basin project  ,10

@@ -1,0 +1,3 @@
+project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_value,svi_class,maintenance_class,people_efficiency_class,structures_efficiency_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes
+1,PINE VILLAGE,channel_detention,4113000,12000,300,lt_4_percent,,,,0.65,moderate_high,regular,,,avoid_impacts,,recreation,,Example project
+2,GREENWOOD FOREST,subdivision_drainage,25512000,25000,900,,Intermediate,medium,0.90,high,outside_regular,,,,within_existing_row,,yes,Example project

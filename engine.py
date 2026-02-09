@@ -168,8 +168,130 @@ def compute_scores(df: pd.DataFrame, config: Dict[str, Any]) -> Tuple[pd.DataFra
 
     out = pd.DataFrame(out_rows)
 
+    if out.empty:
+        if "total_weighted_score" not in out.columns:
+            out["total_weighted_score"] = []
+        out["rank"] = []
+        return out, warnings
+
     # Rank (higher score = better)
     out["rank"] = out["total_weighted_score"].rank(ascending=False, method="min").astype(int)
     out = out.sort_values(["total_weighted_score", "project_name"], ascending=[False, True]).reset_index(drop=True)
 
     return out, warnings
+
+
+def ahp_weights(pairwise_matrix: np.ndarray) -> Tuple[np.ndarray, float]:
+    """
+    Returns (weights, consistency_ratio).
+    pairwise_matrix must be a square reciprocal matrix.
+    """
+    if pairwise_matrix.ndim != 2 or pairwise_matrix.shape[0] != pairwise_matrix.shape[1]:
+        raise ValueError("pairwise_matrix must be a square matrix.")
+
+    n = pairwise_matrix.shape[0]
+    if n == 0:
+        raise ValueError("pairwise_matrix must be non-empty.")
+
+    # Principal eigenvector method
+    eigenvalues, eigenvectors = np.linalg.eig(pairwise_matrix)
+    max_index = int(np.argmax(eigenvalues.real))
+    max_eigval = float(eigenvalues.real[max_index])
+    weights = np.abs(eigenvectors[:, max_index].real)
+    weights = weights / weights.sum() if weights.sum() != 0 else np.ones(n) / n
+
+    # Consistency ratio
+    if n == 1:
+        return weights, 0.0
+
+    ci = (max_eigval - n) / (n - 1)
+    ri_table = {
+        1: 0.00,
+        2: 0.00,
+        3: 0.58,
+        4: 0.90,
+        5: 1.12,
+        6: 1.24,
+        7: 1.32,
+        8: 1.41,
+        9: 1.45,
+        10: 1.49,
+    }
+    ri = ri_table.get(n, 1.49)
+    cr = (ci / ri) if ri != 0 else 0.0
+    return weights, float(cr)
+
+
+def topsis_rank(
+    decision_matrix: np.ndarray,
+    weights: np.ndarray,
+    benefit_flags: List[bool] | None = None,
+    ideal_best: np.ndarray | None = None,
+    ideal_worst: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Returns TOPSIS scores (higher is better) for each alternative (row).
+    """
+    if decision_matrix.ndim != 2:
+        raise ValueError("decision_matrix must be 2D.")
+    if decision_matrix.shape[1] != weights.shape[0]:
+        raise ValueError("weights size must match number of criteria.")
+
+    m, n = decision_matrix.shape
+    if benefit_flags is None:
+        benefit_flags = [True] * n
+    if len(benefit_flags) != n:
+        raise ValueError("benefit_flags size must match number of criteria.")
+
+    # Normalize
+    denom = np.sqrt((decision_matrix ** 2).sum(axis=0))
+    denom[denom == 0] = 1.0
+    norm = decision_matrix / denom
+
+    # Weighted normalized matrix
+    w = weights / weights.sum() if weights.sum() != 0 else np.ones(n) / n
+    weighted = norm * w
+
+    # Ideal best/worst
+    if ideal_best is not None or ideal_worst is not None:
+        if ideal_best is None or ideal_worst is None:
+            best_raw = np.zeros(n)
+            worst_raw = np.zeros(n)
+            for j in range(n):
+                if benefit_flags[j]:
+                    best_raw[j] = np.max(decision_matrix[:, j])
+                    worst_raw[j] = np.min(decision_matrix[:, j])
+                else:
+                    best_raw[j] = np.min(decision_matrix[:, j])
+                    worst_raw[j] = np.max(decision_matrix[:, j])
+            if ideal_best is None:
+                ideal_best = best_raw
+            if ideal_worst is None:
+                ideal_worst = worst_raw
+
+        ideal_best = np.array(ideal_best, dtype=float)
+        ideal_worst = np.array(ideal_worst, dtype=float)
+        if ideal_best.shape[0] != n or ideal_worst.shape[0] != n:
+            raise ValueError("ideal_best and ideal_worst must match number of criteria.")
+
+        ideal_best = (ideal_best / denom) * w
+        ideal_worst = (ideal_worst / denom) * w
+    else:
+        ideal_best = np.zeros(n)
+        ideal_worst = np.zeros(n)
+        for j in range(n):
+            if benefit_flags[j]:
+                ideal_best[j] = np.max(weighted[:, j])
+                ideal_worst[j] = np.min(weighted[:, j])
+            else:
+                ideal_best[j] = np.min(weighted[:, j])
+                ideal_worst[j] = np.max(weighted[:, j])
+
+    # Distances
+    dist_best = np.sqrt(((weighted - ideal_best) ** 2).sum(axis=1))
+    dist_worst = np.sqrt(((weighted - ideal_worst) ** 2).sum(axis=1))
+
+    denom = dist_best + dist_worst
+    denom[denom == 0] = 1.0
+    scores = dist_worst / denom
+    return scores

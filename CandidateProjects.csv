@@ -1,3 +1,15 @@
-project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_class,maintenance_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes
-1,PINE VILLAGE,channel_detention,4113000,12000,300,between_4_and_10_percent,,,moderate_high,regular,avoid_impacts,,recreation,,Example project
-2,GREENWOOD FOREST,subdivision_drainage,25512000,25000,900,,intermediate,medium,high,outside_regular,,within_existing_row,,yes,Example project
+project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_class,maintenance_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes,apple,ball,cat
+1,GREENWOOD FOREST,subdivision_drainage,25512000,25000,900,,intermediate,medium,high,regular,,within_existing_row,,no,,,,
+2,PINE VILLAGE,subdivision_drainage,4366647,21035,1097,,intermediate,high,low,regular,,within_existing_row,,no,,,,
+3,THE COLONY,subdivision_drainage,1409105,447664,504,,intermediate,low,moderate_high,regular,,within_existing_row,,no,,,,
+4,STONEFIELD TERRACE,subdivision_drainage,3566045,18122,2826,,intermediate,high,low_moderate,regular,,within_existing_row,,no,,,,
+5,SHELDON PARK,subdivision_drainage,3286924,112843,1958,,low,low,moderate_high,regular,,within_existing_row,,no,,,,
+6,FALL CREEK,subdivision_drainage,5180210,115375,4730,,high,medium,low_moderate,regular,,within_existing_row,,no,,,,
+7,INVERNESS FOREST,subdivision_drainage,9757572,365774,3913,,high,low,low,regular,,within_existing_row,,no,,,,
+8,URBAN ACRES,subdivision_drainage,1890535,392741,4711,,high,medium,low_moderate,regular,,within_existing_row,,no,,,,
+9,SHELDON WOODS,subdivision_drainage,7133525,386182,4441,,low,high,moderate_high,regular,,within_existing_row,,no,,,,
+10,INWOOD NORTH,subdivision_drainage,11237887,151535,2931,,intermediate,high,low,regular,,within_existing_row,,no,,,,
+11,GREENWOOD FOREST,subdivision_drainage,27153723,175008,4306,,low,low,moderate_high,regular,,within_existing_row,,no,,,,
+12,SHADOWLAKE ESTATES,subdivision_drainage,4491799,378625,2026,,intermediate,medium,high,regular,,within_existing_row,,no,,,,
+13,FAUNA ESTATES,subdivision_drainage,7348124,371910,2518,,low,medium,low,regular,,within_existing_row,,no,,,,
+14,GATEWAY PLACE,subdivision_drainage,10296348,226474,806,,low,high,moderate_high,regular,,within_existing_row,,no,,,,

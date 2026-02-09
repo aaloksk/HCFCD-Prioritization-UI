@@ -2,18 +2,11 @@ import json
 import os
 import copy
 import pandas as pd
+import numpy as np
 import streamlit as st
+import base64
 
-from engine import compute_scores
-
-st.set_page_config(page_title="Project Prioritization UI", layout="wide")
-import json
-import os
-import copy
-import pandas as pd
-import streamlit as st
-
-from engine import compute_scores
+from engine import compute_scores, ahp_weights, topsis_rank
 
 st.set_page_config(page_title="Project Prioritization UI", layout="wide")
 
@@ -158,6 +151,166 @@ if "weights_pct" not in st.session_state:
     st.session_state["weights_pct"] = {k: float(v) * 100.0 for k, v in config["weights"].items()}
 if "show_add_project" not in st.session_state:
     st.session_state["show_add_project"] = False
+if "custom_criteria" not in st.session_state:
+    st.session_state["custom_criteria"] = []
+if "custom_criteria_table_rows" not in st.session_state:
+    st.session_state["custom_criteria_table_rows"] = None
+if "custom_criteria_table_cols" not in st.session_state:
+    st.session_state["custom_criteria_table_cols"] = []
+if "custom_criteria_table_df" not in st.session_state:
+    st.session_state["custom_criteria_table_df"] = None
+
+BASE_CRITERIA_META = [
+    ("people_efficiency", "Resident Benefits Efficiency"),
+    ("structures_efficiency", "Structure Benefit Efficiency"),
+    ("existing_conditions", "Existing Conditions"),
+    ("svi", "Social Vulnerability Index"),
+    ("maintenance", "Long-Term Maintenance Costs"),
+    ("environment", "Minimizes Environmental Impacts"),
+    ("multiple_benefits", "Potential for Multiple Benefits"),
+]
+
+SCORE_COL_MAP = {
+    "people_efficiency": "score_people_efficiency",
+    "structures_efficiency": "score_structures_efficiency",
+    "existing_conditions": "score_existing_conditions",
+    "svi": "score_svi",
+    "maintenance": "score_maintenance",
+    "environment": "score_environment",
+    "multiple_benefits": "score_multiple_benefits",
+}
+
+STANDARD_COLUMNS = [
+    "project_id",
+    "project_name",
+    "project_type",
+    "total_cost",
+    "people_benefitted",
+    "structures_benefitted",
+    "channel_capacity_class",
+    "excess_rainfall_class",
+    "drainage_infra_quality",
+    "svi_value",
+    "svi_class",
+    "maintenance_class",
+    "people_efficiency_class",
+    "structures_efficiency_class",
+    "environment_channel_class",
+    "row_subdivision_class",
+    "multiple_benefits_channel_class",
+    "district_improvement_synergy",
+    "notes",
+]
+
+
+def get_criteria_meta() -> list[tuple[str, str]]:
+    custom = st.session_state.get("custom_criteria", [])
+    custom_meta = []
+    for item in custom:
+        key = item.get("key", "")
+        label = item.get("label", "")
+        include = item.get("include", True)
+        if key:
+            if include:
+                if label:
+                    custom_meta.append((key, label))
+                else:
+                    custom_meta.append((key, key))
+    return BASE_CRITERIA_META + custom_meta
+
+
+def render_weights_inputs(context_key: str, show_reference: bool = True) -> float:
+    def _w(key: str, label: str) -> float:
+        val = st.number_input(
+            label,
+            min_value=0.0,
+            max_value=100.0,
+            value=float(st.session_state["weights_pct"].get(key, 0.0)),
+            step=0.1,
+            format="%.1f",
+            key=f"{context_key}_w_{key}",
+        )
+        val = round(float(val), 1)
+        st.session_state["weights_pct"][key] = val
+        return val
+
+    vals = []
+    for k, label in get_criteria_meta():
+        vals.append(_w(k, f"{label} (%)"))
+
+    total_w = round(sum(vals), 1)
+    st.session_state["is_valid_weights"] = (total_w == 100.0)
+    if st.session_state["is_valid_weights"]:
+        st.success(f"Total: {total_w:.1f}% OK")
+    else:
+        diff = round(100.0 - total_w, 1)
+        if diff > 0:
+            st.error(f"Total: {total_w:.1f}% - add {diff:.1f}%")
+        else:
+            st.error(f"Total: {total_w:.1f}% - remove {abs(diff):.1f}%")
+
+    if show_reference:
+        st.markdown("**Reference HCFCD (2022) Weights for Prioritization:**")
+        hcfcd_weights = config["weights"]
+        hcfcd_weights_table = pd.DataFrame([
+            {"Criterion": "People Benefits Efficiency", "Weight": f"{int(round(hcfcd_weights['people_efficiency'] * 100))}%"},
+            {"Criterion": "Structure Benefits Efficiency", "Weight": f"{int(round(hcfcd_weights['structures_efficiency'] * 100))}%"},
+            {"Criterion": "Existing Conditions", "Weight": f"{int(round(hcfcd_weights['existing_conditions'] * 100))}%"},
+            {"Criterion": "Social Vulnerability Index", "Weight": f"{int(round(hcfcd_weights['svi'] * 100))}%"},
+            {"Criterion": "Long-Term Maintenance Costs", "Weight": f"{int(round(hcfcd_weights['maintenance'] * 100))}%"},
+            {"Criterion": "Minimizes Environmental Impacts", "Weight": f"{int(round(hcfcd_weights['environment'] * 100))}%"},
+            {"Criterion": "Potential for Multiple Benefits", "Weight": f"{int(round(hcfcd_weights['multiple_benefits'] * 100))}%"},
+        ])
+        st.markdown(hcfcd_weights_table.to_html(index=False), unsafe_allow_html=True)
+
+    return total_w
+
+
+def render_weights_table(context_key: str) -> None:
+    meta = get_criteria_meta()
+    total_w = 0.0
+    st.caption("Use the +/- controls to adjust each weight. The total must equal 100.")
+    for key, label in meta:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(label)
+        with col2:
+            val = st.number_input(
+                "Weight (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(st.session_state["weights_pct"].get(key, 0.0)),
+                step=0.1,
+                format="%.1f",
+                key=f"{context_key}_weight_{key}",
+                label_visibility="collapsed",
+            )
+            st.session_state["weights_pct"][key] = round(float(val), 1)
+            total_w += float(val)
+    st.session_state["is_valid_weights"] = (total_w == 100.0)
+    if st.session_state["is_valid_weights"]:
+        st.success(f"Total: {total_w:.1f}% OK")
+    else:
+        diff = round(100.0 - total_w, 1)
+        if diff > 0:
+            st.error(f"Total: {total_w:.1f}% - add {diff:.1f}%")
+        else:
+            st.error(f"Total: {total_w:.1f}% - remove {abs(diff):.1f}%")
+
+
+def render_reference_weights_table() -> None:
+    st.markdown("**Reference HCFCD (2022) Weights for Prioritization:**")
+    hcfcd_weights = config["weights"]
+    hcfcd_weights_table = pd.DataFrame([
+        {"Criterion": "People Benefits Efficiency", "Weight": f"{int(round(hcfcd_weights['people_efficiency'] * 100))}%"},
+        {"Criterion": "Structure Benefits Efficiency", "Weight": f"{int(round(hcfcd_weights['structures_efficiency'] * 100))}%"},
+        {"Criterion": "Existing Conditions", "Weight": f"{int(round(hcfcd_weights['existing_conditions'] * 100))}%"},
+        {"Criterion": "Social Vulnerability Index", "Weight": f"{int(round(hcfcd_weights['svi'] * 100))}%"},
+        {"Criterion": "Long-Term Maintenance Costs", "Weight": f"{int(round(hcfcd_weights['maintenance'] * 100))}%"},
+        {"Criterion": "Minimizes Environmental Impacts", "Weight": f"{int(round(hcfcd_weights['environment'] * 100))}%"},
+        {"Criterion": "Potential for Multiple Benefits", "Weight": f"{int(round(hcfcd_weights['multiple_benefits'] * 100))}%"},
+    ])
+    st.markdown(hcfcd_weights_table.to_html(index=False), unsafe_allow_html=True)
 
 # ----------------------------
 # Header
@@ -165,11 +318,31 @@ if "show_add_project" not in st.session_state:
 col_left, col_right = st.columns([5, 1])
 with col_left:
     st.title("Project Prioritization Tool")
-    st.caption("HCFCD Framework – Internal Use at infraTECH")
+    st.caption("HCFCD Framework - Internal Use at infraTECH")
 with col_right:
-    logo_path = os.path.join(os.path.dirname(__file__), "ITE_Logo.png")
-    if os.path.exists(logo_path):
-        st.image(logo_path, use_container_width=True)
+    hc_logo_path = os.path.join(os.path.dirname(__file__), "HC_P1.jpg")
+    ite_logo_path = os.path.join(os.path.dirname(__file__), "ITE_Logo.png")
+
+    if os.path.exists(hc_logo_path) and os.path.exists(ite_logo_path):
+        with open(hc_logo_path, "rb") as f:
+            hc_b64 = base64.b64encode(f.read()).decode("utf-8")
+        with open(ite_logo_path, "rb") as f:
+            ite_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        st.markdown(
+            f"""
+            <div style="display:flex; align-items:center; justify-content:flex-end; gap:12px;">
+                <img src="data:image/jpeg;base64,{hc_b64}" style="height:90px; width:auto;" />
+                <img src="data:image/png;base64,{ite_b64}" style="height:120px; width:auto;" />
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        if os.path.exists(hc_logo_path):
+            st.image(hc_logo_path, width=100)
+        if os.path.exists(ite_logo_path):
+            st.image(ite_logo_path, width=200)
 
 st.caption("Upload a CSV, edit data, add projects, run scoring, and download results.")
 
@@ -178,8 +351,11 @@ st.caption("Upload a CSV, edit data, add projects, run scoring, and download res
 # ----------------------------
 with st.sidebar:
     st.header("Controls")
-    st.subheader("Load Data")
-    uploaded = st.file_uploader("Upload input CSV", type=["csv"]) 
+    st.subheader("Data Source")
+    uploaded_sidebar = st.file_uploader("Upload input CSV", type=["csv"], key="sidebar_upload")
+    if st.button("Load template dataset", key="btn_load_template_sidebar"):
+        st.session_state["df_work"] = pd.read_csv("input_template.csv")
+        st.session_state["uploaded_file_name"] = "input_template.csv"
     st.subheader("Scoring Config")
     if st.checkbox("Show config", value=False):
         st.json(config)
@@ -188,342 +364,799 @@ with st.sidebar:
         template_bytes = tf.read().encode("utf-8")
     st.download_button("Download input template CSV", data=template_bytes, file_name="input_template.csv", mime="text/csv")
     st.divider()
-    st.header("Weights (must total 100%)")
-
-    def _w(key: str, label: str) -> float:
-        val = st.number_input(label, min_value=0.0, max_value=100.0, value=float(st.session_state["weights_pct"].get(key, 0.0)), step=0.1, format="%.1f", key=f"w_{key}")
-        val = round(float(val), 1)
-        st.session_state["weights_pct"][key] = val
-        return val
-
-    w_people = _w("people_efficiency", "Resident Benefits Efficiency (%)")
-    w_struct = _w("structures_efficiency", "Structure Benefit Efficiency (%)")
-    w_exist  = _w("existing_conditions", "Existing Conditions (%)")
-    w_svi    = _w("svi", "Social Vulnerability Index (%)")
-    w_maint  = _w("maintenance", "Long-Term Maintenance Costs (%)")
-    w_env    = _w("environment", "Minimizes Environmental Impacts (%)")
-    w_multi  = _w("multiple_benefits", "Potential for Multiple Benefits (%)")
-
-    total_w = round(w_people + w_struct + w_exist + w_svi + w_maint + w_env + w_multi, 1)
-    st.session_state["is_valid_weights"] = (total_w == 100.0)
-    if st.session_state["is_valid_weights"]:
-        st.success(f"Total: {total_w:.1f}% ✅")
-    else:
-        diff = round(100.0 - total_w, 1)
-        if diff > 0:
-            st.error(f"Total: {total_w:.1f}% — add {diff:.1f}%")
-        else:
-            st.error(f"Total: {total_w:.1f}% — remove {abs(diff):.1f}%")
-
-    if st.button("Reset to default weights", key="reset_default_weights"):
-        st.session_state["weights_pct"] = {k: float(v) * 100.0 for k, v in config["weights"].items()}
-        st.rerun()
+    st.header("Weights")
+    with st.expander("Direct Weights (sidebar)", expanded=False):
+        render_weights_inputs("sidebar", show_reference=False)
 
 # ----------------------------
 # Load or initialize dataframe
 # ----------------------------
-if "df_work" not in st.session_state or uploaded is not None:
-    if uploaded is None:
-        st.session_state["df_work"] = pd.read_csv("input_template.csv")
-        st.info("Using included template. You can upload a CSV from the sidebar.")
-    else:
-        st.session_state["df_work"] = pd.read_csv(uploaded)
+if "uploaded_file_name" not in st.session_state:
+    st.session_state["uploaded_file_name"] = ""
+
+if uploaded_sidebar is not None:
+    st.session_state["df_work"] = pd.read_csv(uploaded_sidebar)
+    st.session_state["uploaded_file_name"] = uploaded_sidebar.name
+
+if "df_work" not in st.session_state:
+    st.session_state["df_work"] = pd.read_csv("input_template.csv")
+    st.session_state["uploaded_file_name"] = "input_template.csv"
+    st.info("Using included template. You can upload a CSV from the sidebar.")
 
 df = st.session_state["df_work"]
 
-# Editable grid
-st.subheader("Edit Project Data")
-st.write("Click a cell to edit. You can also add rows at the bottom of the table.")
-edited = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-st.session_state["df_work"] = edited
+tab_data, tab_weights, tab_ahp, tab_topsis = st.tabs(
+    ["Prioritization Database", "Direct Weights", "AHP Weights", "Ranking"]
+)
 
-# ----------------------------
-# Add Project (in-context, no form wrapper)
-# ----------------------------
-st.divider()
-st.subheader("Add Project")
-col_btn1, col_btn2 = st.columns([1, 5])
-with col_btn1:
-    if st.button("➕ Add Project", key="btn_add_project"):
-        st.session_state["show_add_project"] = True
-with col_btn2:
+
+def render_data_tab():
+    st.subheader("Data Source")
+    col_u1, col_u2 = st.columns([3, 1])
+    with col_u1:
+        uploaded_main = st.file_uploader("Upload input CSV", type=["csv"], key="main_upload")
+    with col_u2:
+        if st.button("Load template dataset", key="btn_load_template_main"):
+            st.session_state["df_work"] = pd.read_csv("input_template.csv")
+            st.session_state["uploaded_file_name"] = "input_template.csv"
+        if st.button("Clear current dataset", key="btn_clear_dataset"):
+            st.session_state["df_work"] = st.session_state["df_work"].head(0)
+            st.session_state["uploaded_file_name"] = "cleared"
+    if uploaded_main is not None:
+        st.session_state["df_work"] = pd.read_csv(uploaded_main)
+        st.session_state["uploaded_file_name"] = uploaded_main.name
+
+    current_name = st.session_state.get("uploaded_file_name", "") or "session data"
+    st.caption(f"Current dataset: {current_name}")
+
+    st.divider()
+    df_local = st.session_state["df_work"]
+
+    # Editable grid
+    st.subheader("Edit Project Data")
+    st.write("Click a cell to edit. You can also add rows at the bottom of the table.")
+    edited = st.data_editor(df_local, use_container_width=True, num_rows="dynamic")
+    st.session_state["df_work"] = edited
+
+    # ----------------------------
+    # Add Project (in-context, no form wrapper)
+    # ----------------------------
+    st.divider()
+    st.subheader("Add Project")
+    col_btn1, col_btn2 = st.columns([1, 5])
+    with col_btn1:
+        if st.button("Add Project", key="btn_add_project"):
+            st.session_state["show_add_project"] = True
+    with col_btn2:
+        if st.session_state["show_add_project"]:
+            st.caption("Fill the fields below then click Save Project to append it to the table above.")
+
+    project_type_options = maps.get("project_type", ["channel_detention", "subdivision_drainage"])
+    svi_options = list(maps.get("svi_class", {}).keys()) or ["low", "low_moderate", "moderate_high", "high"]
+    maint_options = list(maps.get("maintenance_class", {}).keys()) or ["extensive_specialized", "outside_regular", "regular"]
+    channel_capacity_options = list(maps.get("existing_conditions_channel_capacity", {}).keys()) or ["gt_1_percent", "lt_1_percent", "lt_2_percent", "lt_4_percent", "lt_10_percent", "lt_20_percent", "lt_50_percent"]
+    env_channel_options = list(maps.get("environment_channel", {}).keys()) or ["individual_permit_and_credits", "credits", "avoid_impacts", "minimal_none"]
+    mb_channel_options = list(maps.get("multiple_benefits_channel", {}).keys()) or ["none", "recreation", "environment", "both"]
+    rain_options = list(maps.get("existing_conditions_subdivision_matrix", {}).keys()) or ["high", "intermediate", "low"]
+    infra_options = ["high", "intermediate", "low"]
+    row_options = list(maps.get("row_subdivision", {}).keys()) or ["needs_additional_row", "within_existing_row"]
+    syn_options = list(maps.get("multiple_benefits_subdivision", {}).keys()) or ["no", "yes"]
+
     if st.session_state["show_add_project"]:
-        st.caption("Fill the fields below then click Save Project to append it to the table above.")
+        # 1) Project Type
+        project_type = st.selectbox("1) Project Type*", project_type_options, index=0, key="add_project_type", format_func=lambda k: label_for("project_type", k))
 
-project_type_options = maps.get("project_type", ["channel_detention", "subdivision_drainage"])
-svi_options = list(maps.get("svi_class", {}).keys()) or ["low", "low_moderate", "moderate_high", "high"]
-maint_options = list(maps.get("maintenance_class", {}).keys()) or ["extensive_specialized", "outside_regular", "regular"]
-channel_capacity_options = list(maps.get("existing_conditions_channel_capacity", {}).keys()) or ["gt_1_percent", "lt_1_percent", "lt_2_percent", "lt_4_percent", "lt_10_percent", "lt_20_percent", "lt_50_percent"]
-env_channel_options = list(maps.get("environment_channel", {}).keys()) or ["individual_permit_and_credits", "credits", "avoid_impacts", "minimal_none"]
-mb_channel_options = list(maps.get("multiple_benefits_channel", {}).keys()) or ["none", "recreation", "environment", "both"]
-rain_options = list(maps.get("existing_conditions_subdivision_matrix", {}).keys()) or ["high", "intermediate", "low"]
-infra_options = ["high", "intermediate", "low"]
-row_options = list(maps.get("row_subdivision", {}).keys()) or ["needs_additional_row", "within_existing_row"]
-syn_options = list(maps.get("multiple_benefits_subdivision", {}).keys()) or ["no", "yes"]
+        # 2) Project Name
+        st.markdown("### 2) Project Name")
+        project_name = st.text_input("Project Name*", value="", key="add_project_name")
+        st.divider()
 
-if st.session_state["show_add_project"]:
-    # 1) Project Type
-    project_type = st.selectbox("1️⃣ Project Type*", project_type_options, index=0, key="add_project_type", format_func=lambda k: label_for("project_type", k))
+        # 3) Project Efficiency Weighting Factor (in-context)
+        st.markdown("### 3) Project Efficiency Weighting Factor")
+        with st.expander("Project Efficiency Tables", expanded=False):
+            # Build DataFrames and render side-by-side using pandas Styler to avoid raw-HTML rendering issues
+            people_rows = [
+                ("Less than $6,000/person", 10),
+                ("$6,000 to $15,000/person", 8),
+                ("$15,001 to $28,000/person", 6),
+                ("$28,001 to $77,000/person", 4),
+                ("Greater than $77,000/person", 1),
+            ]
+            struct_rows = [
+                ("Less than $23,000/structure", 10),
+                ("$23,000 to $60,000/structure", 8),
+                ("$60,001 to $106,000/structure", 6),
+                ("$106,001 to $261,000/structure", 4),
+                ("Greater than $261,000/structure", 1),
+            ]
+            df_people = pd.DataFrame(people_rows, columns=["Criteria", "Score"])
+            df_struct = pd.DataFrame(struct_rows, columns=["Criteria", "Score"])
 
-    # 2) Project Name
-    st.markdown("### 2️⃣ Project Name")
-    project_name = st.text_input("Project Name*", value="", key="add_project_name")
-    st.divider()
+            colors = {10: "#d4edda", 8: "#c3e6cb", 6: "#fff3cd", 4: "#f8d7da", 1: "#f5c6cb"}
 
-    # 3) Project Efficiency Weighting Factor (in-context)
-    st.markdown("### 3️⃣ Project Efficiency Weighting Factor")
-    with st.expander("💰 Project Efficiency Tables", expanded=False):
-        # Build DataFrames and render side-by-side using pandas Styler to avoid raw-HTML rendering issues
-        people_rows = [
-            ("Less than $6,000/person", 10),
-            ("$6,000 to $15,000/person", 8),
-            ("$15,001 to $28,000/person", 6),
-            ("$28,001 to $77,000/person", 4),
-            ("Greater than $77,000/person", 1),
-        ]
-        struct_rows = [
-            ("Less than $23,000/structure", 10),
-            ("$23,000 to $60,000/structure", 8),
-            ("$60,001 to $106,000/structure", 6),
-            ("$106,001 to $261,000/structure", 4),
-            ("Greater than $261,000/structure", 1),
-        ]
-        df_people = pd.DataFrame(people_rows, columns=["Criteria", "Score"])
-        df_struct = pd.DataFrame(struct_rows, columns=["Criteria", "Score"])
+            # Create stylers
+            sty_people = df_people.style
+            sty_struct = df_struct.style
 
-        colors = {10: "#d4edda", 8: "#c3e6cb", 6: "#fff3cd", 4: "#f8d7da", 1: "#f5c6cb"}
+            # Apply row-wise colors
+            sty_people = sty_people.apply(lambda row: [f'background-color: {colors[row[1]]}']*len(row), axis=1)
+            sty_struct = sty_struct.apply(lambda row: [f'background-color: {colors[row[1]]}']*len(row), axis=1)
 
-        def row_color(s):
-            return [f'background-color: {colors.get(s.name_val, "transparent")}' for _ in s.index]
+            # Set header style
+            header_style = [{"selector": "th", "props": [("background-color", "#f0f0f0"), ("padding", "8px")]}]
+            sty_people = sty_people.set_table_styles(header_style)
+            sty_struct = sty_struct.set_table_styles(header_style)
 
-        # Create stylers
-        sty_people = df_people.style
-        sty_struct = df_struct.style
+            combined_html = f'<div style="display:flex; gap:12px; align-items:flex-start;">{sty_people.to_html()}</div>'
+            # insert structure table after people table by simple concatenation
+            combined_html = combined_html.replace("</div>", sty_struct.to_html() + "</div>")
+            st.markdown(combined_html, unsafe_allow_html=True)
+            efficiency_input_method = st.radio("How would you like to input project efficiency?", options=["Calculate from project costs", "Enter efficiency classes directly"], index=0, horizontal=True, key="add_efficiency_method")
+        efficiency_input_method = st.session_state.get("add_efficiency_method", "Calculate from project costs")
 
-        # Apply row-wise colors
-        sty_people = sty_people.apply(lambda row: [f'background-color: {colors[row[1]]}']*len(row), axis=1)
-        sty_struct = sty_struct.apply(lambda row: [f'background-color: {colors[row[1]]}']*len(row), axis=1)
+        if efficiency_input_method == "Enter efficiency classes directly":
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                people_efficiency_class = st.selectbox("Resident Benefits Efficiency*", options=list(EFFICIENCY_CLASSES.keys()), format_func=lambda k: f"Score {k}: {EFFICIENCY_CLASSES[k]}", key="add_people_efficiency_class")
+            with ec2:
+                structures_efficiency_class = st.selectbox("Structure Benefit Efficiency*", options=list(EFFICIENCY_CLASSES.keys()), format_func=lambda k: f"Score {k}: {EFFICIENCY_CLASSES[k]}", key="add_structures_efficiency_class")
+            total_cost = 0.0
+            people_benefitted = 0.0
+            structures_benefitted = 0.0
+        else:
+            st.info("Efficiency will be calculated from: Total Cost divided by Residents (or Structures) Benefitted")
+            col_cost, col_people, col_structs = st.columns(3)
+            with col_cost:
+                total_cost = st.number_input("Total Cost*", min_value=0.0, value=0.0, step=1000.0, format="%.0f", key="add_total_cost")
+            with col_people:
+                people_benefitted = st.number_input("Residents Benefitted*", min_value=0.0, value=0.0, step=1.0, format="%.0f", key="add_people_benefitted")
+            with col_structs:
+                structures_benefitted = st.number_input("Structures Benefitted*", min_value=0.0, value=0.0, step=1.0, format="%.0f", key="add_structures_benefitted")
+            people_efficiency_class = ""
+            structures_efficiency_class = ""
 
-        # Set header style
-        header_style = [{"selector": "th", "props": [("background-color", "#f0f0f0"), ("padding", "8px")]}]
-        sty_people = sty_people.set_table_styles(header_style)
-        sty_struct = sty_struct.set_table_styles(header_style)
+        st.divider()
 
-        combined_html = f'<div style="display:flex; gap:12px; align-items:flex-start;">{sty_people.to_html()}</div>'
-        # insert structure table after people table by simple concatenation
-        combined_html = combined_html.replace("</div>", sty_struct.to_html() + "</div>")
-        st.markdown(combined_html, unsafe_allow_html=True)
-        efficiency_input_method = st.radio("How would you like to input project efficiency?", options=["Calculate from project costs", "Enter efficiency classes directly"], index=0, horizontal=True, key="add_efficiency_method")
-    efficiency_input_method = st.session_state.get("add_efficiency_method", "Calculate from project costs")
+        # 4) Existing Conditions
+        st.markdown("### 4) Existing Conditions Weighting Factor")
+        if project_type == "channel_detention":
+            with st.expander("View Channel Scoring Criteria", expanded=False):
+                st.markdown(get_existing_conditions_channel_html(), unsafe_allow_html=True)
+            channel_capacity_class = st.selectbox("Channel Capacity Class*", channel_capacity_options, index=0, key="add_channel_capacity_class", format_func=lambda k: label_for("existing_conditions_channel_capacity", k))
+            excess_rainfall_class = ""
+            drainage_infra_quality = ""
+        else:
+            with st.expander("View Subdivision Scoring Criteria", expanded=False):
+                st.markdown(get_existing_conditions_subdivision_html(), unsafe_allow_html=True)
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                excess_rainfall_class = st.selectbox("Excess Rainfall Class*", rain_options, index=0, key="add_excess_rainfall_class")
+            with ec2:
+                drainage_infra_quality = st.selectbox("Drainage Infrastructure Quality*", infra_options, index=0, key="add_drainage_infra_quality")
+            channel_capacity_class = ""
 
-    if efficiency_input_method == "Enter efficiency classes directly":
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            people_efficiency_class = st.selectbox("Resident Benefits Efficiency*", options=list(EFFICIENCY_CLASSES.keys()), format_func=lambda k: f"Score {k}: {EFFICIENCY_CLASSES[k]}", key="add_people_efficiency_class")
-        with ec2:
-            structures_efficiency_class = st.selectbox("Structure Benefit Efficiency*", options=list(EFFICIENCY_CLASSES.keys()), format_func=lambda k: f"Score {k}: {EFFICIENCY_CLASSES[k]}", key="add_structures_efficiency_class")
-        total_cost = 0.0
-        people_benefitted = 0.0
-        structures_benefitted = 0.0
-    else:
-        st.info("💡 Efficiency will be calculated from: Total Cost ÷ Residents (or Structures) Benefitted")
-        col_cost, col_people, col_structs = st.columns(3)
-        with col_cost:
-            total_cost = st.number_input("Total Cost*", min_value=0.0, value=0.0, step=1000.0, format="%.0f", key="add_total_cost")
-        with col_people:
-            people_benefitted = st.number_input("Residents Benefitted*", min_value=0.0, value=0.0, step=1.0, format="%.0f", key="add_people_benefitted")
-        with col_structs:
-            structures_benefitted = st.number_input("Structures Benefitted*", min_value=0.0, value=0.0, step=1.0, format="%.0f", key="add_structures_benefitted")
-        people_efficiency_class = ""
-        structures_efficiency_class = ""
+        st.divider()
 
-    st.divider()
+        # 5) Social Vulnerability Index (SVI)
+        st.markdown("### 5) Social Vulnerability Index (SVI)")
+        with st.expander("Social Vulnerability Index (SVI)", expanded=False):
+            st.markdown(get_svi_html(), unsafe_allow_html=True)
+            svi_input_method = st.radio("How would you like to input SVI?", options=["Select from predefined class", "Enter SVI value (0-1)"], index=0, horizontal=True, key="add_svi_method")
+        svi_input_method = st.session_state.get("add_svi_method", "Select from predefined class")
+        if svi_input_method == "Enter SVI value (0-1)":
+            col_slider, col_info = st.columns([3, 1])
+            with col_slider:
+                svi_value = st.slider("SVI Value", min_value=0.0, max_value=1.0, value=0.5, step=0.01, format="%.2f", key="add_svi_value")
+            svi_class = classify_svi(svi_value)
+            with col_info:
+                st.markdown(f"**Auto-classified:**  \n**{label_for('svi_class', svi_class)}**")
+        else:
+            svi_value = None
+            svi_class = st.selectbox("SVI Class*", svi_options, index=0, key="add_svi_class", format_func=lambda k: label_for("svi_class", k))
 
-    # 4) Existing Conditions
-    st.markdown("### 4️⃣ Existing Conditions Weighting Factor")
-    if project_type == "channel_detention":
-        with st.expander("📋 View Channel Scoring Criteria", expanded=False):
-            st.markdown(get_existing_conditions_channel_html(), unsafe_allow_html=True)
-        channel_capacity_class = st.selectbox("Channel Capacity Class*", channel_capacity_options, index=0, key="add_channel_capacity_class", format_func=lambda k: label_for("existing_conditions_channel_capacity", k))
-        excess_rainfall_class = ""
-        drainage_infra_quality = ""
-    else:
-        with st.expander("📋 View Subdivision Scoring Criteria", expanded=False):
-            st.markdown(get_existing_conditions_subdivision_html(), unsafe_allow_html=True)
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            excess_rainfall_class = st.selectbox("Excess Rainfall Class*", rain_options, index=0, key="add_excess_rainfall_class")
-        with ec2:
-            drainage_infra_quality = st.selectbox("Drainage Infrastructure Quality*", infra_options, index=0, key="add_drainage_infra_quality")
-        channel_capacity_class = ""
+        st.divider()
 
-    st.divider()
+        # 6) Minimizes Environmental Impact
+        st.markdown("### 6) Minimizes Environmental Impact Weighting Factor")
+        if project_type == "channel_detention":
+            with st.expander("View Channel Environmental Criteria", expanded=False):
+                st.markdown(get_environment_channel_html(), unsafe_allow_html=True)
+            environment_channel_class = st.selectbox("Environmental Class (Channel)*", env_channel_options, index=0, key="add_env_channel", format_func=lambda k: label_for("environment_channel", k))
+            row_subdivision_class = ""
+        else:
+            with st.expander("View Subdivision Environmental Criteria", expanded=False):
+                st.markdown(get_environment_subdivision_html(), unsafe_allow_html=True)
+            row_subdivision_class = st.selectbox("ROW Availability (Subdivision)*", row_options, index=0, key="add_row_subdivision", format_func=lambda k: label_for("row_subdivision", k))
+            environment_channel_class = ""
 
-    # 5) Social Vulnerability Index (SVI)
-    st.markdown("### 5️⃣ Social Vulnerability Index (SVI)")
-    with st.expander("📊 Social Vulnerability Index (SVI)", expanded=False):
-        st.markdown(get_svi_html(), unsafe_allow_html=True)
-        svi_input_method = st.radio("How would you like to input SVI?", options=["Select from predefined class", "Enter SVI value (0-1)"], index=0, horizontal=True, key="add_svi_method")
-    svi_input_method = st.session_state.get("add_svi_method", "Select from predefined class")
-    if svi_input_method == "Enter SVI value (0-1)":
-        col_slider, col_info = st.columns([3, 1])
-        with col_slider:
-            svi_value = st.slider("SVI Value", min_value=0.0, max_value=1.0, value=0.5, step=0.01, format="%.2f", key="add_svi_value")
-        svi_class = classify_svi(svi_value)
-        with col_info:
-            st.markdown(f"**Auto-classified:**  \n**{label_for('svi_class', svi_class)}**")
-    else:
-        svi_value = None
-        svi_class = st.selectbox("SVI Class*", svi_options, index=0, key="add_svi_class", format_func=lambda k: label_for("svi_class", k))
+        st.divider()
 
-    st.divider()
+        # 7) Potential for Multiple Benefits
+        st.markdown("### 7) Potential for Multiple Benefits Weighting Factor")
+        if project_type == "channel_detention":
+            with st.expander("View Channel Multiple Benefits Criteria", expanded=False):
+                st.markdown(get_multiple_benefits_channel_html(), unsafe_allow_html=True)
+            multiple_benefits_channel_class = st.selectbox("Multiple Benefits (Channel)*", mb_channel_options, index=0, key="add_mb_channel", format_func=lambda k: label_for("multiple_benefits_channel", k))
+            district_improvement_synergy = ""
+        else:
+            with st.expander("View Subdivision Multiple Benefits Criteria", expanded=False):
+                st.markdown(get_multiple_benefits_subdivision_html(), unsafe_allow_html=True)
+            district_improvement_synergy = st.selectbox("District Improvement Synergy*", syn_options, index=0, key="add_synergy", format_func=lambda k: label_for("multiple_benefits_subdivision", k))
+            multiple_benefits_channel_class = ""
 
-    # 6) Minimizes Environmental Impact
-    st.markdown("### 6️⃣ Minimizes Environmental Impact Weighting Factor")
-    if project_type == "channel_detention":
-        with st.expander("📋 View Channel Environmental Criteria", expanded=False):
-            st.markdown(get_environment_channel_html(), unsafe_allow_html=True)
-        environment_channel_class = st.selectbox("Environmental Class (Channel)*", env_channel_options, index=0, key="add_env_channel", format_func=lambda k: label_for("environment_channel", k))
-        row_subdivision_class = ""
-    else:
-        with st.expander("📋 View Subdivision Environmental Criteria", expanded=False):
-            st.markdown(get_environment_subdivision_html(), unsafe_allow_html=True)
-        row_subdivision_class = st.selectbox("ROW Availability (Subdivision)*", row_options, index=0, key="add_row_subdivision", format_func=lambda k: label_for("row_subdivision", k))
-        environment_channel_class = ""
+        st.divider()
 
-    st.divider()
+        # Other Details
+        st.markdown("### Other Details")
+        c_maint, c_notes = st.columns([1, 2])
+        with c_maint:
+            maintenance_class = st.selectbox("Maintenance Class*", maint_options, index=0, key="add_maint_class", format_func=lambda k: label_for("maintenance_class", k))
+        with c_notes:
+            notes = st.text_area("Notes (optional)", value="", key="add_notes", height=100)
 
-    # 7) Potential for Multiple Benefits
-    st.markdown("### 7️⃣ Potential for Multiple Benefits Weighting Factor")
-    if project_type == "channel_detention":
-        with st.expander("📋 View Channel Multiple Benefits Criteria", expanded=False):
-            st.markdown(get_multiple_benefits_channel_html(), unsafe_allow_html=True)
-        multiple_benefits_channel_class = st.selectbox("Multiple Benefits (Channel)*", mb_channel_options, index=0, key="add_mb_channel", format_func=lambda k: label_for("multiple_benefits_channel", k))
-        district_improvement_synergy = ""
-    else:
-        with st.expander("📋 View Subdivision Multiple Benefits Criteria", expanded=False):
-            st.markdown(get_multiple_benefits_subdivision_html(), unsafe_allow_html=True)
-        district_improvement_synergy = st.selectbox("District Improvement Synergy*", syn_options, index=0, key="add_synergy", format_func=lambda k: label_for("multiple_benefits_subdivision", k))
-        multiple_benefits_channel_class = ""
+        custom_inputs = {}
+        custom_criteria = [c for c in st.session_state.get("custom_criteria", []) if c.get("include")]
+        if custom_criteria:
+            st.divider()
+            st.markdown("### Custom Criteria Inputs")
+            for c in custom_criteria:
+                key = c.get("key", "")
+                label = c.get("label") or key
+                ctype = c.get("type", "Text")
+                if not key:
+                    continue
+                if ctype == "Number":
+                    custom_inputs[key] = st.number_input(label, value=0.0, key=f"custom_{key}")
+                else:
+                    custom_inputs[key] = st.text_input(label, value="", key=f"custom_{key}")
 
-    st.divider()
+        st.divider()
 
-    # Other Details
-    st.markdown("### Other Details")
-    c_maint, c_notes = st.columns([1, 2])
-    with c_maint:
-        maintenance_class = st.selectbox("Maintenance Class*", maint_options, index=0, key="add_maint_class", format_func=lambda k: label_for("maintenance_class", k))
-    with c_notes:
-        notes = st.text_area("Notes (optional)", value="", key="add_notes", height=100)
+        # Action buttons
+        colb1, colb2 = st.columns(2)
+        with colb1:
+            if st.button("Save Project", key="btn_save_project"):
+                # validation
+                if not project_name.strip():
+                    st.error("Project Name is required.")
+                elif efficiency_input_method == "Calculate from project costs" and total_cost <= 0:
+                    st.error("Total Cost must be greater than 0.")
+                else:
+                    df_current = st.session_state["df_work"].copy()
+                    next_id = 1
+                    if "project_id" in df_current.columns:
+                        try:
+                            mx = pd.to_numeric(df_current["project_id"], errors="coerce").max()
+                            next_id = int(mx) + 1 if pd.notna(mx) else 1
+                        except Exception:
+                            next_id = 1
 
-    st.divider()
+                    new_row = {
+                        "project_id": next_id,
+                        "project_name": project_name.strip(),
+                        "project_type": project_type,
+                        "total_cost": float(total_cost) if total_cost else "",
+                        "people_benefitted": float(people_benefitted) if people_benefitted else "",
+                        "structures_benefitted": float(structures_benefitted) if structures_benefitted else "",
+                        "channel_capacity_class": channel_capacity_class,
+                        "excess_rainfall_class": excess_rainfall_class,
+                        "drainage_infra_quality": drainage_infra_quality,
+                        "svi_value": svi_value if svi_value is not None else "",
+                        "svi_class": svi_class,
+                        "maintenance_class": maintenance_class,
+                        "people_efficiency_class": people_efficiency_class,
+                        "structures_efficiency_class": structures_efficiency_class,
+                        "environment_channel_class": environment_channel_class,
+                        "row_subdivision_class": row_subdivision_class,
+                        "multiple_benefits_channel_class": multiple_benefits_channel_class,
+                        "district_improvement_synergy": district_improvement_synergy,
+                        "notes": notes.strip() if notes else "",
+                    }
 
-    # Action buttons
-    colb1, colb2 = st.columns(2)
-    with colb1:
-        if st.button("✅ Save Project", key="btn_save_project"):
-            # validation
-            if not project_name.strip():
-                st.error("Project Name is required.")
-            elif efficiency_input_method == "Calculate from project costs" and total_cost <= 0:
-                st.error("Total Cost must be greater than 0.")
-            else:
-                df_current = st.session_state["df_work"].copy()
-                next_id = 1
-                if "project_id" in df_current.columns:
-                    try:
-                        mx = pd.to_numeric(df_current["project_id"], errors="coerce").max()
-                        next_id = int(mx) + 1 if pd.notna(mx) else 1
-                    except Exception:
-                        next_id = 1
+                    for k in new_row.keys():
+                        if k not in df_current.columns:
+                            df_current[k] = ""
 
-                new_row = {
-                    "project_id": next_id,
-                    "project_name": project_name.strip(),
-                    "project_type": project_type,
-                    "total_cost": float(total_cost) if total_cost else "",
-                    "people_benefitted": float(people_benefitted) if people_benefitted else "",
-                    "structures_benefitted": float(structures_benefitted) if structures_benefitted else "",
-                    "channel_capacity_class": channel_capacity_class,
-                    "excess_rainfall_class": excess_rainfall_class,
-                    "drainage_infra_quality": drainage_infra_quality,
-                    "svi_value": svi_value if svi_value is not None else "",
-                    "svi_class": svi_class,
-                    "maintenance_class": maintenance_class,
-                    "people_efficiency_class": people_efficiency_class,
-                    "structures_efficiency_class": structures_efficiency_class,
-                    "environment_channel_class": environment_channel_class,
-                    "row_subdivision_class": row_subdivision_class,
-                    "multiple_benefits_channel_class": multiple_benefits_channel_class,
-                    "district_improvement_synergy": district_improvement_synergy,
-                    "notes": notes.strip() if notes else "",
-                }
+                    for k, v in custom_inputs.items():
+                        if k not in df_current.columns:
+                            df_current[k] = ""
+                        new_row[k] = v
 
-                for k in new_row.keys():
-                    if k not in df_current.columns:
-                        df_current[k] = ""
-
-                df_current = pd.concat([df_current, pd.DataFrame([new_row])], ignore_index=True)
-                st.session_state["df_work"] = df_current
+                    df_current = pd.concat([df_current, pd.DataFrame([new_row])], ignore_index=True)
+                    st.session_state["df_work"] = df_current
+                    st.session_state["show_add_project"] = False
+                    st.success(f"Added project: {project_name.strip()} (ID {next_id})")
+                    st.rerun()
+        with colb2:
+            if st.button("Cancel", key="btn_cancel_add"):
                 st.session_state["show_add_project"] = False
-                st.success(f"Added project: {project_name.strip()} (ID {next_id})")
                 st.rerun()
-    with colb2:
-        if st.button("❌ Cancel", key="btn_cancel_add"):
-            st.session_state["show_add_project"] = False
-            st.rerun()
 
-# ----------------------------
-# Run + Results
-# ----------------------------
-colA, colB, colC = st.columns([1, 1, 2])
-is_valid_weights = bool(st.session_state.get("is_valid_weights", False))
+    st.divider()
+    st.subheader("Schema and Columns")
+    col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
+    with col_c1:
+        new_col_name = st.text_input("New column header (short)", key="new_col_name")
+    with col_c2:
+        new_col_desc = st.text_input("Short description (full form)", key="new_col_desc")
+    with col_c3:
+        new_col_type = st.selectbox("Column type", ["Text", "Number"], key="new_col_type")
 
-with colA:
-    run = st.button("Run Prioritization", type="primary", disabled=not is_valid_weights, key="btn_run_prioritization")
-with colB:
-    st.button("Clear Results", on_click=lambda: st.session_state.pop("results", None), key="btn_clear_results")
+    if new_col_type == "Number":
+        new_col_default = st.number_input("Default value", value=0.0, key="new_col_default_num")
+    else:
+        new_col_default = st.text_input("Default value", value="", key="new_col_default_text")
 
-if run:
-    try:
-        weights_pct = st.session_state["weights_pct"]
-        weights_dec = {k: round(float(v) / 100.0, 6) for k, v in weights_pct.items()}
-        config_run = copy.deepcopy(config)
-        config_run["weights"] = weights_dec
-        results, warnings = compute_scores(st.session_state["df_work"], config_run)
-        st.session_state["results"] = results
-        st.session_state["warnings"] = warnings
-        st.session_state["last_run_weights_pct"] = dict(weights_pct)
-    except Exception as e:
-        st.error(f"Error: {e}")
+    if st.button("Add Column", key="btn_add_column"):
+        if not new_col_name.strip():
+            st.error("Column name is required.")
+        else:
+            if new_col_name in st.session_state["df_work"].columns:
+                st.error("Column already exists.")
+            else:
+                st.session_state["df_work"][new_col_name] = new_col_default
+                key_name = new_col_name.strip()
+                if not any(c.get("key") == key_name for c in st.session_state["custom_criteria"]):
+                    st.session_state["custom_criteria"].append({
+                        "key": key_name,
+                        "label": new_col_desc.strip(),
+                        "include": True,
+                        "type": new_col_type,
+                    })
+                st.session_state["weights_pct"][key_name] = 0.0
+                st.success(f"Added column: {new_col_name}")
 
-if "warnings" in st.session_state and st.session_state["warnings"]:
-    st.warning("Some projects have missing/invalid inputs. See details below.")
-    with st.expander("Warnings"):
-        for w in st.session_state["warnings"]:
-            st.write("- " + w)
+    st.divider()
+    st.subheader("Custom Criteria Mapping")
+    st.caption("Map extra columns from your dataset to criteria with clear descriptions.")
 
-if "results" in st.session_state:
-    results = st.session_state["results"]
-    if "last_run_weights_pct" in st.session_state:
-        lrw = st.session_state["last_run_weights_pct"]
-        st.caption(f"Results reflect the last run weights (total = {sum(lrw.values()):.1f}%).")
+    df_current = st.session_state["df_work"]
+    base_set = set(STANDARD_COLUMNS + list(SCORE_COL_MAP.values()))
+    candidate_cols = [c for c in df_current.columns if c not in base_set]
 
-    st.subheader("Ranked Results")
-    st.dataframe(results, use_container_width=True)
+    existing = {c.get("key"): c for c in st.session_state.get("custom_criteria", []) if c.get("key")}
+    if st.session_state.get("custom_criteria_table_df") is None or st.session_state.get("custom_criteria_table_cols") != candidate_cols:
+        rows = []
+        for c in candidate_cols:
+            row = existing.get(c, {"key": c, "label": "", "include": False})
+            rows.append({
+                "Column": c,
+                "Description": row.get("label", ""),
+                "Include": bool(row.get("include", False)),
+            })
+        st.session_state["custom_criteria_table_df"] = pd.DataFrame(rows)
+        st.session_state["custom_criteria_table_cols"] = list(candidate_cols)
 
-    st.subheader("Download Results")
-    csv_bytes = results.to_csv(index=False).encode("utf-8")
-    st.download_button(label="Download ranked_results.csv", data=csv_bytes, file_name="ranked_results.csv", mime="text/csv")
+    if candidate_cols:
+        edited = st.data_editor(
+            st.session_state["custom_criteria_table_df"],
+            use_container_width=True,
+            hide_index=True,
+            key="custom_criteria_table",
+            column_config={
+                "Description": st.column_config.TextColumn(),
+                "Include": st.column_config.CheckboxColumn(),
+            },
+        )
+        st.session_state["custom_criteria_table_df"] = edited
 
-    with st.expander("Show only key output columns"):
-        key_cols = [
-            "rank", "project_id", "project_name", "project_type",
-            "total_weighted_score",
-            "score_people_efficiency", "score_structures_efficiency",
-            "score_existing_conditions", "score_svi",
-            "score_maintenance", "score_environment", "score_multiple_benefits",
-            "total_cost", "people_benefitted", "structures_benefitted"
-        ]
-        existing_cols = [c for c in key_cols if c in results.columns]
-        st.dataframe(results[existing_cols], use_container_width=True)
+        if st.button("Save Criteria Mapping", key="btn_save_custom_mapping"):
+            custom_list = []
+            for _, r in edited.iterrows():
+                if bool(r.get("Include")):
+                    key = str(r.get("Column", "")).strip()
+                    label = str(r.get("Description", "")).strip()
+                    if key:
+                        dtype = "Number" if pd.api.types.is_numeric_dtype(df_current[key]) else "Text"
+                        custom_list.append({"key": key, "label": label, "include": True, "type": dtype})
+                        if key not in st.session_state["weights_pct"]:
+                            st.session_state["weights_pct"][key] = 0.0
+            st.session_state["custom_criteria"] = custom_list
+            st.success("Custom criteria mapping saved.")
+    else:
+        st.info("No extra columns found to map. Add columns above or upload a dataset with additional fields.")
+
+
+
+def render_direct_weights_tab():
+    st.subheader("Direct Weight Input")
+    st.write("Enter weights as percentages. The total must equal 100.")
+    render_weights_table("direct")
+    render_reference_weights_table()
+
+
+def render_ahp_tab():
+    st.subheader("AHP Weights")
+    st.write("Build a pairwise comparison table using the Saaty scale. The value means Criterion A is preferred over Criterion B.")
+
+    meta = get_criteria_meta()
+    label_map = {k: v for k, v in meta}
+    criteria_keys = [k for k, _ in meta]
+
+    selected = st.multiselect(
+        "Select criteria for AHP",
+        options=criteria_keys,
+        default=criteria_keys,
+        format_func=lambda k: label_map.get(k, k),
+        key="ahp_selected_criteria",
+    )
+
+    if len(selected) < 2:
+        st.warning("Select at least two criteria to run AHP.")
+        return
+
+    saaty_options = [
+        ("1/9 (Extreme)", 1/9),
+        ("1/7 (Very strong)", 1/7),
+        ("1/5 (Strong)", 1/5),
+        ("1/3 (Moderate)", 1/3),
+        ("1 (Equal)", 1.0),
+        ("3 (Moderate)", 3.0),
+        ("5 (Strong)", 5.0),
+        ("7 (Very strong)", 7.0),
+        ("9 (Extreme)", 9.0),
+    ]
+    option_labels = [o[0] for o in saaty_options]
+    option_values = {o[0]: o[1] for o in saaty_options}
+    scale_df = pd.DataFrame({
+        "Saaty Scale": option_labels,
+        "Meaning": [
+            "Criterion A is extremely less important than B",
+            "Criterion A is very strongly less important than B",
+            "Criterion A is strongly less important than B",
+            "Criterion A is moderately less important than B",
+            "Criteria A and B are equally important",
+            "Criterion A is moderately more important than B",
+            "Criterion A is strongly more important than B",
+            "Criterion A is very strongly more important than B",
+            "Criterion A is extremely more important than B",
+        ],
+    })
+    st.dataframe(scale_df, use_container_width=True)
+
+    if st.session_state.get("ahp_pairs_selected") != selected:
+        pairs = []
+        for i in range(len(selected)):
+            for j in range(i + 1, len(selected)):
+                pairs.append({
+                    "Criterion A": label_map[selected[i]],
+                    "Criterion B": label_map[selected[j]],
+                    "Preference": "1 (Equal)",
+                })
+        st.session_state["ahp_pairs"] = pairs
+        st.session_state["ahp_pairs_selected"] = list(selected)
+
+    pairs_df = pd.DataFrame(st.session_state.get("ahp_pairs", []))
+    edited = st.data_editor(
+        pairs_df,
+        use_container_width=True,
+        hide_index=True,
+        key="ahp_pairs_table",
+        column_config={
+            "Preference": st.column_config.SelectboxColumn(options=option_labels)
+        },
+    )
+    st.session_state["ahp_pairs"] = edited.to_dict("records")
+
+    if st.button("Compute AHP Weights", key="btn_compute_ahp"):
+        n = len(selected)
+        matrix = np.ones((n, n), dtype=float)
+        key_by_label = {label_map[k]: k for k in selected}
+        for _, row in edited.iterrows():
+            a_label = row.get("Criterion A", "")
+            b_label = row.get("Criterion B", "")
+            pref_label = row.get("Preference", "1 (Equal)")
+            if a_label in key_by_label and b_label in key_by_label:
+                i = selected.index(key_by_label[a_label])
+                j = selected.index(key_by_label[b_label])
+                val = option_values.get(pref_label, 1.0)
+                matrix[i, j] = val
+                matrix[j, i] = 1.0 / val if val != 0 else 1.0
+
+        weights, cr = ahp_weights(matrix)
+        st.session_state["ahp_weights"] = {selected[i]: float(weights[i]) for i in range(n)}
+        st.session_state["ahp_cr"] = float(cr)
+        st.session_state["ahp_selected_snapshot"] = list(selected)
+
+    if "ahp_weights" in st.session_state and st.session_state.get("ahp_selected_snapshot") == list(selected):
+        w = st.session_state["ahp_weights"]
+        cr = st.session_state.get("ahp_cr", 0.0)
+        w_df = pd.DataFrame([
+            {"Criterion": label_map[k], "Weight": round(v, 6)} for k, v in w.items()
+        ])
+        st.markdown("### AHP Weights")
+        w_style = w_df.style.set_properties(**{"text-align": "center"})
+        w_style = w_style.set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+        st.dataframe(w_style, use_container_width=True)
+        if cr > 0.1:
+            st.warning(f"Consistency Ratio (CR) = {cr:.3f}. Consider revising pairwise comparisons (CR should be <= 0.10).")
+        else:
+            st.success(f"Consistency Ratio (CR) = {cr:.3f}.")
+
+        if st.button("Use AHP weights as Direct Weights", key="btn_apply_ahp"):
+            for k, v in w.items():
+                st.session_state["weights_pct"][k] = round(float(v) * 100.0, 1)
+            st.success("AHP weights applied to Direct Weights.")
+
+
+def render_topsis_tab():
+    st.subheader("Ranking")
+    st.write("Select criteria, then choose a ranking method.")
+
+    weights_pct = st.session_state.get("weights_pct", {k: float(v) * 100.0 for k, v in config["weights"].items()})
+    weights_dec = {k: round(float(v) / 100.0, 6) for k, v in weights_pct.items()}
+    config_run = copy.deepcopy(config)
+    config_run["weights"] = weights_dec
+
+    results, warnings = compute_scores(st.session_state["df_work"], config_run)
+    if warnings:
+        st.info("Some projects have missing or invalid inputs. Missing scores are treated as 0 for TOPSIS.")
+
+    score_cols = [SCORE_COL_MAP[k] for k, _ in BASE_CRITERIA_META if SCORE_COL_MAP.get(k) in results.columns]
+    custom_keys = [c.get("key") for c in st.session_state.get("custom_criteria", []) if c.get("key")]
+    numeric_custom = [
+        c for c in custom_keys
+        if c in results.columns and pd.api.types.is_numeric_dtype(results[c])
+    ]
+    available_cols = score_cols + numeric_custom
+    st.caption("Only numeric columns are available for TOPSIS. Add numeric columns in the Data tab if needed.")
+
+    base_label_map = {k: label for k, label in BASE_CRITERIA_META}
+    label_by_col = {v: base_label_map.get(k, v) for k, v in SCORE_COL_MAP.items() if v}
+    for item in st.session_state.get("custom_criteria", []):
+        key = item.get("key")
+        label = item.get("label") or item.get("key")
+        if key:
+            label_by_col[key] = label
+
+    selected_cols = st.multiselect(
+        "Select criteria for ranking",
+        options=available_cols,
+        default=score_cols,
+        format_func=lambda c: label_by_col.get(c, c),
+        key="topsis_selected_cols",
+    )
+
+    if len(selected_cols) < 2:
+        st.warning("Select at least two criteria to rank.")
+        return
+
+    method_options = [
+        "Weighted Sum (Direct Weights)",
+        "Direct Weights + TOPSIS",
+        "AHP Weights + TOPSIS",
+        "Equal Weights + TOPSIS",
+    ]
+    compare_methods = st.checkbox("Compare two methods side-by-side", key="ranking_compare_methods")
+    if compare_methods:
+        methods = st.multiselect(
+            "Select up to two methods",
+            options=method_options,
+            default=["Weighted Sum (Direct Weights)", "Direct Weights + TOPSIS"],
+            max_selections=2,
+            key="ranking_methods",
+        )
+    else:
+        method = st.radio(
+            "Ranking method",
+            options=method_options,
+            index=0,
+            horizontal=False,
+            key="ranking_method",
+        )
+        methods = [method]
+
+    if st.session_state.get("topsis_selected_snapshot") != selected_cols:
+        rows = []
+        for c in selected_cols:
+            rows.append({
+                "Criterion": c,
+                "Type": "Benefit",
+                "Use Auto": True,
+                "Ideal Best": 10.0,
+                "Ideal Worst": 1.0,
+            })
+        st.session_state["topsis_settings"] = rows
+        st.session_state["topsis_selected_snapshot"] = list(selected_cols)
+
+    settings_df = pd.DataFrame(st.session_state.get("topsis_settings", []))
+    if "Criterion" not in settings_df.columns:
+        settings_df = pd.DataFrame(columns=["Criterion", "Type", "Use Auto", "Ideal Best", "Ideal Worst"])
+    settings_df = settings_df[settings_df["Criterion"].isin(selected_cols)]
+    if "Better Value" in settings_df.columns and "Type" not in settings_df.columns:
+        settings_df["Type"] = settings_df["Better Value"].apply(
+            lambda v: "Cost" if str(v).lower() == "lower" else "Benefit"
+        )
+    if "Better Value" in settings_df.columns:
+        settings_df = settings_df.drop(columns=["Better Value"])
+
+    label_by_col = {v: f"Score - {label}" for k, label in BASE_CRITERIA_META for v in [SCORE_COL_MAP.get(k)] if v}
+    for item in st.session_state.get("custom_criteria", []):
+        key = item.get("key")
+        label = item.get("label") or item.get("key")
+        if key:
+            label_by_col[key] = label
+    settings_df["Criterion"] = settings_df["Criterion"].map(lambda c: label_by_col.get(c, c))
+
+    edited = None
+    if any(m.endswith("+ TOPSIS") for m in methods):
+        st.caption("Type: Benefit = higher is better, Cost = lower is better.")
+        edited = st.data_editor(
+            settings_df,
+            use_container_width=True,
+            hide_index=True,
+            key="topsis_settings_table",
+            column_config={
+                "Type": st.column_config.SelectboxColumn(options=["Benefit", "Cost"]),
+                "Use Auto": st.column_config.CheckboxColumn(),
+                "Ideal Best": st.column_config.NumberColumn(),
+                "Ideal Worst": st.column_config.NumberColumn(),
+            },
+        )
+        st.session_state["topsis_settings"] = edited.to_dict("records")
+
+    if st.button("Run Ranking", key="btn_run_topsis"):
+        data = results[selected_cols].copy()
+        for c in selected_cols:
+            data[c] = pd.to_numeric(data[c], errors="coerce")
+        if data.isna().any().any():
+            st.warning("Some selected columns have missing or non-numeric values. They are treated as 0.")
+            data = data.fillna(0.0)
+
+        results_by_source = {}
+        for method in methods:
+            if method == "Weighted Sum (Direct Weights)":
+                inv_score_map = {v: k for k, v in SCORE_COL_MAP.items()}
+                w = []
+                missing_cols = []
+                for c in selected_cols:
+                    k = inv_score_map.get(c, c)
+                    if k not in weights_pct:
+                        missing_cols.append(c)
+                        w.append(1.0)
+                    else:
+                        w.append(float(weights_pct.get(k, 0.0)) / 100.0)
+                if missing_cols:
+                    st.warning("Some selected columns have no direct weight. Using equal weight for those columns.")
+                w = np.array(w, dtype=float)
+                w_sum = w.sum()
+                if w_sum == 0:
+                    w = np.ones(len(selected_cols), dtype=float) / len(selected_cols)
+                else:
+                    w = w / w_sum
+
+                decision = data.to_numpy(dtype=float)
+                scores = (decision * w).sum(axis=1)
+
+                out = results.copy()
+                out["ranking_score"] = scores
+                out["ranking_rank"] = out["ranking_score"].rank(ascending=False, method="min").astype(int)
+                out = out.sort_values(["ranking_score", "project_name"], ascending=[False, True]).reset_index(drop=True)
+
+                show_cols = ["ranking_rank", "project_id", "project_name", "ranking_score"] + selected_cols
+                results_by_source[method] = out[show_cols]
+                continue
+
+            benefit_flags = []
+            ideal_best = []
+            ideal_worst = []
+
+            label_to_col = {v: k for k, v in label_by_col.items()}
+            missing_rows = 0
+            for _, row in edited.iterrows():
+                c = label_to_col.get(row["Criterion"], row["Criterion"])
+                if c not in selected_cols:
+                    missing_rows += 1
+                    continue
+                is_benefit = str(row.get("Type", "Benefit")).lower() != "cost"
+                benefit_flags.append(is_benefit)
+
+                auto_flag = bool(row.get("Use Auto", True))
+                best_val = row.get("Ideal Best")
+                worst_val = row.get("Ideal Worst")
+
+                if auto_flag or pd.isna(best_val) or pd.isna(worst_val):
+                    if is_benefit:
+                        best_val = data[c].max()
+                        worst_val = data[c].min()
+                    else:
+                        best_val = data[c].min()
+                        worst_val = data[c].max()
+
+                ideal_best.append(float(best_val))
+                ideal_worst.append(float(worst_val))
+
+            if missing_rows or len(benefit_flags) != len(selected_cols):
+                for c in selected_cols:
+                    if len(benefit_flags) >= len(selected_cols):
+                        break
+                    if c not in [label_to_col.get(r["Criterion"], r["Criterion"]) for _, r in edited.iterrows()]:
+                        benefit_flags.append(True)
+                        ideal_best.append(10.0)
+                        ideal_worst.append(1.0)
+
+            inv_score_map = {v: k for k, v in SCORE_COL_MAP.items()}
+
+            def weights_for_source(source: str) -> np.ndarray:
+                if source == "AHP weights":
+                    ahp = st.session_state.get("ahp_weights")
+                    if not ahp:
+                        st.warning("AHP weights not found. Falling back to equal weights.")
+                        return np.ones(len(selected_cols), dtype=float)
+                    w = []
+                    for c in selected_cols:
+                        k = inv_score_map.get(c, c)
+                        if k not in ahp:
+                            st.warning("AHP weights do not cover all selected criteria. Falling back to equal weights.")
+                            return np.ones(len(selected_cols), dtype=float)
+                        w.append(float(ahp[k]))
+                    return np.array(w, dtype=float)
+
+                if source == "Direct weights":
+                    w = []
+                    missing_cols = []
+                    for c in selected_cols:
+                        k = inv_score_map.get(c, c)
+                        if k not in weights_pct:
+                            missing_cols.append(c)
+                            w.append(1.0)
+                        else:
+                            w.append(float(weights_pct.get(k, 0.0)) / 100.0)
+                    if missing_cols:
+                        st.warning("Some selected columns have no direct weight. Using equal weight for those columns.")
+                    return np.array(w, dtype=float)
+
+                return np.ones(len(selected_cols), dtype=float)
+
+            if method == "Direct Weights + TOPSIS":
+                weight_sources = ["Direct weights"]
+            elif method == "AHP Weights + TOPSIS":
+                weight_sources = ["AHP weights"]
+            else:
+                weight_sources = ["Equal weights"]
+
+            decision = data.to_numpy(dtype=float)
+            for source in weight_sources:
+                w = weights_for_source(source)
+                scores = topsis_rank(
+                    decision,
+                    w,
+                    benefit_flags=benefit_flags,
+                    ideal_best=np.array(ideal_best),
+                    ideal_worst=np.array(ideal_worst),
+                )
+                out = results.copy()
+                out["topsis_score"] = scores
+                out["topsis_rank"] = out["topsis_score"].rank(ascending=False, method="min").astype(int)
+                out = out.sort_values(["topsis_score", "project_name"], ascending=[False, True]).reset_index(drop=True)
+                show_cols = ["topsis_rank", "project_id", "project_name", "topsis_score"] + selected_cols
+                results_by_source[method] = out[show_cols]
+
+        st.session_state["topsis_results_multi"] = results_by_source
+
+    if "topsis_results_multi" in st.session_state:
+        results_by_source = st.session_state["topsis_results_multi"]
+        if len(results_by_source) == 1:
+            st.dataframe(next(iter(results_by_source.values())), use_container_width=True)
+        else:
+            col_a, col_b = st.columns(2)
+            items = list(results_by_source.items())
+            with col_a:
+                st.markdown(f"**{items[0][0]}**")
+                st.dataframe(items[0][1], use_container_width=True)
+            with col_b:
+                st.markdown(f"**{items[1][0]}**")
+                st.dataframe(items[1][1], use_container_width=True)
+
+
+with tab_data:
+    render_data_tab()
+
+with tab_weights:
+    render_direct_weights_tab()
+
+with tab_ahp:
+    render_ahp_tab()
+
+with tab_topsis:
+    render_topsis_tab()

@@ -1,10 +1,13 @@
 import json
 import os
 import copy
+import io
+import hashlib
 import pandas as pd
 import numpy as np
 import streamlit as st
 import base64
+import sys
 
 from engine import compute_scores, ahp_weights, topsis_rank
 
@@ -13,11 +16,17 @@ st.set_page_config(page_title="Project Prioritization UI", layout="wide")
 # ----------------------------
 # Helpers and config
 # ----------------------------
-with open("scoring_config.json", "r", encoding="utf-8") as f:
+def resource_path(rel_path: str) -> str:
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, rel_path)
+    return os.path.join(os.path.dirname(__file__), rel_path)
+
+with open(resource_path("scoring_config.json"), "r", encoding="utf-8") as f:
     config = json.load(f)
 
 maps = config.get("mappings", {})
 labels = config.get("labels", {})
+SVI_RECLASS_COL = "svi_value_reclassified"
 
 def label_for(group: str, key: str) -> str:
     try:
@@ -33,6 +42,115 @@ def classify_svi(value: float) -> str:
     if value < 0.75:
         return "moderate_high"
     return "high"
+
+
+def find_column_case_insensitive(df: pd.DataFrame, target: str) -> str | None:
+    for c in df.columns:
+        if str(c).strip().lower() == target.lower():
+            return c
+    return None
+
+
+def _norm_col_name(name: str) -> str:
+    return "".join(ch for ch in str(name).strip().lower() if ch.isalnum())
+
+
+def find_column_by_aliases(df: pd.DataFrame, aliases: list[str]) -> str | None:
+    normalized = {_norm_col_name(c): c for c in df.columns}
+    for a in aliases:
+        key = _norm_col_name(a)
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
+def classify_svi_series(values: pd.Series, mode: str = "normalized") -> tuple[pd.Series, pd.Series]:
+    numeric = pd.to_numeric(values, errors="coerce")
+
+    if mode == "normalized":
+        valid = numeric.dropna()
+        if valid.empty:
+            normalized = numeric.copy()
+        else:
+            vmin = float(valid.min())
+            vmax = float(valid.max())
+            if vmax > vmin:
+                # Re-scale to 0.01..0.99 so outputs avoid hard 0/1 edges.
+                normalized = ((numeric - vmin) / (vmax - vmin)) * 0.98 + 0.01
+            else:
+                normalized = pd.Series(0.5, index=numeric.index, dtype=float)
+        class_input = normalized
+    else:
+        normalized = numeric
+        class_input = numeric
+
+    classes = class_input.apply(lambda x: classify_svi(float(x)) if pd.notna(x) else "")
+    return normalized, classes
+
+
+def preprocess_uploaded_df(df_in: pd.DataFrame) -> pd.DataFrame:
+    df = df_in.copy()
+    svi_col = find_column_case_insensitive(df, "svi")
+    if svi_col is None:
+        return df
+
+    svi_raw = pd.to_numeric(df[svi_col], errors="coerce")
+    valid = svi_raw.dropna()
+    use_raw = (not valid.empty) and bool(((valid >= 0) & (valid <= 1)).all())
+    mode = "raw" if use_raw else "normalized"
+    svi_norm, svi_class_auto = classify_svi_series(svi_raw, mode=mode)
+
+    if SVI_RECLASS_COL not in df.columns:
+        df[SVI_RECLASS_COL] = svi_norm
+    else:
+        existing_svi_value = pd.to_numeric(df[SVI_RECLASS_COL], errors="coerce")
+        df[SVI_RECLASS_COL] = existing_svi_value.where(existing_svi_value.notna(), svi_norm)
+
+    # Backward compatibility for older files/logic that still reference svi_value.
+    if "svi_value" not in df.columns:
+        df["svi_value"] = df[SVI_RECLASS_COL]
+
+    if "svi_class" not in df.columns:
+        df["svi_class"] = ""
+
+    svi_class_existing = df["svi_class"].astype(str).str.strip()
+    missing_class = df["svi_class"].isna() | (svi_class_existing == "")
+    df.loc[missing_class, "svi_class"] = svi_class_auto[missing_class]
+
+    return df
+
+
+def classify_excess_rainfall_series(values: pd.Series) -> tuple[pd.Series, pd.Series]:
+    numeric = pd.to_numeric(values, errors="coerce")
+    valid = numeric.dropna()
+    if valid.empty:
+        normalized = numeric.copy()
+    else:
+        vmin = float(valid.min())
+        vmax = float(valid.max())
+        if vmax > vmin:
+            normalized = (numeric - vmin) / (vmax - vmin)
+        else:
+            normalized = pd.Series(0.5, index=numeric.index, dtype=float)
+
+    classes = normalized.apply(
+        lambda x: ("low" if x < 0.33 else ("intermediate" if x < 0.66 else "high")) if pd.notna(x) else ""
+    )
+    return normalized, classes
+
+
+def read_uploaded_csv_with_id(uploaded_file) -> tuple[pd.DataFrame, str]:
+    raw = uploaded_file.getvalue()
+    file_hash = hashlib.md5(raw).hexdigest()
+    upload_id = f"{uploaded_file.name}:{uploaded_file.size}:{file_hash}"
+    df = pd.read_csv(io.BytesIO(raw))
+    return df, upload_id
+
+
+def sync_project_data_editor() -> None:
+    edited_df = st.session_state.get("project_data_editor")
+    if isinstance(edited_df, pd.DataFrame):
+        st.session_state["df_work"] = edited_df
 
 EFFICIENCY_CLASSES = {
     "10": "Very High (Score 10)",
@@ -191,6 +309,7 @@ STANDARD_COLUMNS = [
     "excess_rainfall_class",
     "drainage_infra_quality",
     "svi_value",
+    "svi_value_reclassified",
     "svi_class",
     "maintenance_class",
     "people_efficiency_class",
@@ -320,8 +439,8 @@ with col_left:
     st.title("Project Prioritization Tool")
     st.caption("HCFCD Framework - Internal Use at infraTECH")
 with col_right:
-    hc_logo_path = os.path.join(os.path.dirname(__file__), "HC_P1.jpg")
-    ite_logo_path = os.path.join(os.path.dirname(__file__), "ITE_Logo.png")
+    hc_logo_path = resource_path("HC_P1.jpg")
+    ite_logo_path = resource_path("ITE_Logo.png")
 
     if os.path.exists(hc_logo_path) and os.path.exists(ite_logo_path):
         with open(hc_logo_path, "rb") as f:
@@ -354,13 +473,15 @@ with st.sidebar:
     st.subheader("Data Source")
     uploaded_sidebar = st.file_uploader("Upload input CSV", type=["csv"], key="sidebar_upload")
     if st.button("Load template dataset", key="btn_load_template_sidebar"):
-        st.session_state["df_work"] = pd.read_csv("input_template.csv")
+        st.session_state["df_work"] = preprocess_uploaded_df(pd.read_csv(resource_path("input_template.csv")))
         st.session_state["uploaded_file_name"] = "input_template.csv"
+        st.session_state["loaded_sidebar_upload_id"] = None
+        st.session_state["svi_source_force_reset"] = True
     st.subheader("Scoring Config")
     if st.checkbox("Show config", value=False):
         st.json(config)
     st.subheader("Template")
-    with open("input_template.csv", "r", encoding="utf-8") as tf:
+    with open(resource_path("input_template.csv"), "r", encoding="utf-8") as tf:
         template_bytes = tf.read().encode("utf-8")
     st.download_button("Download input template CSV", data=template_bytes, file_name="input_template.csv", mime="text/csv")
     st.divider()
@@ -373,20 +494,28 @@ with st.sidebar:
 # ----------------------------
 if "uploaded_file_name" not in st.session_state:
     st.session_state["uploaded_file_name"] = ""
+if "loaded_sidebar_upload_id" not in st.session_state:
+    st.session_state["loaded_sidebar_upload_id"] = None
+if "loaded_main_upload_id" not in st.session_state:
+    st.session_state["loaded_main_upload_id"] = None
 
 if uploaded_sidebar is not None:
-    st.session_state["df_work"] = pd.read_csv(uploaded_sidebar)
-    st.session_state["uploaded_file_name"] = uploaded_sidebar.name
+    uploaded_df, upload_id = read_uploaded_csv_with_id(uploaded_sidebar)
+    if st.session_state.get("loaded_sidebar_upload_id") != upload_id:
+        st.session_state["df_work"] = preprocess_uploaded_df(uploaded_df)
+        st.session_state["uploaded_file_name"] = uploaded_sidebar.name
+        st.session_state["loaded_sidebar_upload_id"] = upload_id
+        st.session_state["svi_source_force_reset"] = True
 
 if "df_work" not in st.session_state:
-    st.session_state["df_work"] = pd.read_csv("input_template.csv")
+    st.session_state["df_work"] = preprocess_uploaded_df(pd.read_csv(resource_path("input_template.csv")))
     st.session_state["uploaded_file_name"] = "input_template.csv"
     st.info("Using included template. You can upload a CSV from the sidebar.")
 
 df = st.session_state["df_work"]
 
-tab_data, tab_weights, tab_ahp, tab_topsis = st.tabs(
-    ["Prioritization Database", "Direct Weights", "AHP Weights", "Ranking"]
+tab_data, tab_tools, tab_weights, tab_ahp, tab_topsis = st.tabs(
+    ["Prioritization Database", "Data Tools", "Direct Weights", "AHP Weights", "Ranking"]
 )
 
 
@@ -397,14 +526,22 @@ def render_data_tab():
         uploaded_main = st.file_uploader("Upload input CSV", type=["csv"], key="main_upload")
     with col_u2:
         if st.button("Load template dataset", key="btn_load_template_main"):
-            st.session_state["df_work"] = pd.read_csv("input_template.csv")
+            st.session_state["df_work"] = preprocess_uploaded_df(pd.read_csv(resource_path("input_template.csv")))
             st.session_state["uploaded_file_name"] = "input_template.csv"
+            st.session_state["loaded_main_upload_id"] = None
+            st.session_state["svi_source_force_reset"] = True
         if st.button("Clear current dataset", key="btn_clear_dataset"):
             st.session_state["df_work"] = st.session_state["df_work"].head(0)
             st.session_state["uploaded_file_name"] = "cleared"
+            st.session_state["loaded_main_upload_id"] = None
+            st.session_state["svi_source_force_reset"] = True
     if uploaded_main is not None:
-        st.session_state["df_work"] = pd.read_csv(uploaded_main)
-        st.session_state["uploaded_file_name"] = uploaded_main.name
+        uploaded_df, upload_id = read_uploaded_csv_with_id(uploaded_main)
+        if st.session_state.get("loaded_main_upload_id") != upload_id:
+            st.session_state["df_work"] = preprocess_uploaded_df(uploaded_df)
+            st.session_state["uploaded_file_name"] = uploaded_main.name
+            st.session_state["loaded_main_upload_id"] = upload_id
+            st.session_state["svi_source_force_reset"] = True
 
     current_name = st.session_state.get("uploaded_file_name", "") or "session data"
     st.caption(f"Current dataset: {current_name}")
@@ -415,8 +552,13 @@ def render_data_tab():
     # Editable grid
     st.subheader("Edit Project Data")
     st.write("Click a cell to edit. You can also add rows at the bottom of the table.")
-    edited = st.data_editor(df_local, use_container_width=True, num_rows="dynamic")
-    st.session_state["df_work"] = edited
+    st.data_editor(
+        df_local,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="project_data_editor",
+        on_change=sync_project_data_editor,
+    )
 
     # ----------------------------
     # Add Project (in-context, no form wrapper)
@@ -642,6 +784,7 @@ def render_data_tab():
                         "excess_rainfall_class": excess_rainfall_class,
                         "drainage_infra_quality": drainage_infra_quality,
                         "svi_value": svi_value if svi_value is not None else "",
+                        "svi_value_reclassified": svi_value if svi_value is not None else "",
                         "svi_class": svi_class,
                         "maintenance_class": maintenance_class,
                         "people_efficiency_class": people_efficiency_class,
@@ -673,7 +816,7 @@ def render_data_tab():
                 st.rerun()
 
     st.divider()
-    st.subheader("Schema and Columns")
+    st.subheader("Add New Parameter")
     col_c1, col_c2, col_c3 = st.columns([2, 2, 1])
     with col_c1:
         new_col_name = st.text_input("New column header (short)", key="new_col_name")
@@ -765,6 +908,146 @@ def render_direct_weights_tab():
     render_reference_weights_table()
 
 
+def render_data_tools_tab():
+    st.subheader("Data Tools")
+    st.caption("Utilities for data cleanup and reclassification. More tools can be added in this tab later.")
+
+    df_local = st.session_state.get("df_work", pd.DataFrame()).copy()
+    if df_local.empty:
+        st.info("Dataset is empty. Upload or add data first.")
+        return
+
+    numeric_like_cols = []
+    for c in df_local.columns:
+        if pd.api.types.is_numeric_dtype(df_local[c]) or str(c).strip().lower() in {"svi", "svi_value"}:
+            numeric_like_cols.append(c)
+
+    if not numeric_like_cols:
+        st.info("No numeric columns available for SVI reclassification.")
+        return
+
+    svi_col_exact = find_column_case_insensitive(df_local, "svi")
+    default_source = svi_col_exact or numeric_like_cols[0]
+    default_index = numeric_like_cols.index(default_source) if default_source in numeric_like_cols else 0
+    cols_sig = tuple(str(c) for c in df_local.columns)
+    if st.session_state.get("svi_source_cols_sig") != cols_sig or st.session_state.get("svi_source_force_reset"):
+        st.session_state["svi_reclass_source_col"] = default_source
+        st.session_state["svi_source_cols_sig"] = cols_sig
+        st.session_state["svi_source_force_reset"] = False
+    if (
+        "svi_reclass_source_col" not in st.session_state
+        or st.session_state.get("svi_reclass_source_col") not in numeric_like_cols
+    ):
+        st.session_state["svi_reclass_source_col"] = default_source
+
+    with st.expander("SVI Reclassification", expanded=False):
+        source_col = st.selectbox(
+            "SVI source column",
+            options=numeric_like_cols,
+            index=default_index,
+            key="svi_reclass_source_col",
+        )
+
+        method_label = st.radio(
+            "Method",
+            options=[
+                "Normalize values to 0.01-0.99 (min-max), then classify at 0.25 increments",
+                "Use raw values as-is for classification",
+            ],
+            index=0,
+            key="svi_reclass_method",
+        )
+        method = "normalized" if method_label.startswith("Normalize") else "raw"
+
+        source_series = pd.to_numeric(df_local[source_col], errors="coerce")
+        svi_value_new, svi_class_new = classify_svi_series(source_series, mode=method)
+
+        counts_df = (
+            svi_class_new.replace("", np.nan)
+            .dropna()
+            .value_counts()
+            .rename_axis("SVI Class")
+            .reset_index(name="Count")
+        )
+        if not counts_df.empty:
+            counts_df["SVI Class"] = counts_df["SVI Class"].apply(lambda k: label_for("svi_class", k))
+            st.markdown("Preview of resulting class counts:")
+            st.dataframe(counts_df, use_container_width=True)
+
+        if st.button("Apply SVI Reclassification", key="btn_apply_svi_reclass"):
+            df_updated = st.session_state["df_work"].copy()
+            df_updated[SVI_RECLASS_COL] = svi_value_new
+            df_updated["svi_value"] = svi_value_new
+            df_updated["svi_class"] = svi_class_new
+            st.session_state["df_work"] = df_updated
+            st.session_state.pop("project_data_editor", None)
+            st.success("SVI values/classification updated in current dataset.")
+            st.rerun()
+
+        if df_local.columns.duplicated().any():
+            st.warning("Duplicate column names detected in dataset. Preview is showing first occurrence of each duplicate column.")
+        preview_df = df_local.loc[:, ~df_local.columns.duplicated(keep="first")].copy()
+        source_col_preview = st.session_state.get("svi_reclass_source_col", default_source)
+        preview_cols = []
+        for c in ["project_id", "project_name", source_col_preview, SVI_RECLASS_COL, "svi_class"]:
+            if c in preview_df.columns and c not in preview_cols:
+                preview_cols.append(c)
+        st.markdown("Current Working Dataset Preview (SVI Columns)")
+        st.dataframe(preview_df[preview_cols] if preview_cols else preview_df, use_container_width=True, height=280)
+
+    rain_default = find_column_by_aliases(df_local, ["excess_rainfall", "Exc_Rain"]) or numeric_like_cols[0]
+    if st.session_state.get("rain_source_cols_sig") != cols_sig:
+        st.session_state["rain_reclass_source_col"] = rain_default
+        st.session_state["rain_source_cols_sig"] = cols_sig
+    if (
+        "rain_reclass_source_col" not in st.session_state
+        or st.session_state.get("rain_reclass_source_col") not in numeric_like_cols
+    ):
+        st.session_state["rain_reclass_source_col"] = rain_default
+
+    with st.expander("Existing Condition Excess Rainfall Classification", expanded=False):
+        rain_source_col = st.selectbox(
+            "Excess rainfall source column",
+            options=numeric_like_cols,
+            index=numeric_like_cols.index(st.session_state["rain_reclass_source_col"]),
+            key="rain_reclass_source_col",
+        )
+        st.caption("Values are min-max normalized to 0-1, then classified: Low (<0.33), Intermediate (0.33-<0.66), High (>=0.66).")
+
+        rain_norm, rain_class = classify_excess_rainfall_series(df_local[rain_source_col])
+        rain_counts = (
+            rain_class.replace("", np.nan)
+            .dropna()
+            .value_counts()
+            .rename_axis("Excess Rainfall Class")
+            .reset_index(name="Count")
+        )
+        if not rain_counts.empty:
+            st.dataframe(rain_counts, use_container_width=True)
+
+        rain_preview_cols = []
+        for c in ["project_id", "project_name", rain_source_col, "excess_rainfall_class"]:
+            if c in preview_df.columns and c not in rain_preview_cols:
+                rain_preview_cols.append(c)
+        rain_preview = preview_df[rain_preview_cols].copy() if rain_preview_cols else preview_df.copy()
+        rain_preview["excess_rainfall_class_new"] = rain_class.values
+        rain_preview["excess_rainfall_norm"] = rain_norm.values
+        st.markdown("Current Working Dataset Preview (Excess Rainfall Columns)")
+        st.dataframe(rain_preview, use_container_width=True, height=280)
+
+        if st.button("Apply Excess Rainfall Classification", key="btn_apply_rain_reclass"):
+            df_updated = st.session_state["df_work"].copy()
+            df_updated["excess_rainfall_class"] = rain_class
+            st.session_state["df_work"] = df_updated
+            st.session_state.pop("project_data_editor", None)
+            st.success("Excess rainfall class updated in current dataset.")
+            st.rerun()
+
+    with st.expander("Current Working Dataset Preview (Full)", expanded=False):
+        preview_df = df_local.loc[:, ~df_local.columns.duplicated(keep="first")].copy()
+        st.dataframe(preview_df, use_container_width=True, height=320)
+
+
 def render_ahp_tab():
     st.subheader("AHP Weights")
     st.write("Build a pairwise comparison table using the Saaty scale. The value means Criterion A is preferred over Criterion B.")
@@ -780,6 +1063,44 @@ def render_ahp_tab():
         format_func=lambda k: label_map.get(k, k),
         key="ahp_selected_criteria",
     )
+
+    def _build_ahp_template(keys: list[str]) -> pd.DataFrame:
+        labels_local = [label_map[k] for k in keys]
+        m = pd.DataFrame("", index=labels_local, columns=labels_local)
+        for i in range(len(labels_local)):
+            for j in range(len(labels_local)):
+                if i == j:
+                    m.iat[i, j] = "1"
+                elif i < j:
+                    m.iat[i, j] = ""
+                else:
+                    m.iat[i, j] = ""
+        m.index.name = "Parameter"
+        return m
+
+    st.markdown("### Export / Import AHP Matrix")
+    st.caption("CSV format: first row and first column are parameter names, diagonal values are 1. Fill only the upper triangular cells (above the diagonal).")
+    d1, d2 = st.columns(2)
+    with d1:
+        all_template = _build_ahp_template(criteria_keys)
+        st.download_button(
+            "Download AHP Template (All Parameters)",
+            data=all_template.to_csv(index=True).encode("utf-8"),
+            file_name="ahp_template_all_parameters.csv",
+            mime="text/csv",
+            key="ahp_download_all",
+        )
+    with d2:
+        selected_template = _build_ahp_template(selected if selected else criteria_keys)
+        st.download_button(
+            "Download AHP Template (Selected Parameters)",
+            data=selected_template.to_csv(index=True).encode("utf-8"),
+            file_name="ahp_template_selected_parameters.csv",
+            mime="text/csv",
+            key="ahp_download_selected",
+        )
+
+    uploaded_ahp = st.file_uploader("Import completed AHP matrix CSV", type=["csv"], key="ahp_upload_matrix")
 
     if len(selected) < 2:
         st.warning("Select at least two criteria to run AHP.")
@@ -798,6 +1119,26 @@ def render_ahp_tab():
     ]
     option_labels = [o[0] for o in saaty_options]
     option_values = {o[0]: o[1] for o in saaty_options}
+    def _parse_saaty_value(x) -> float:
+        s = str(x).strip()
+        if not s:
+            return np.nan
+        if "/" in s:
+            parts = s.split("/", 1)
+            try:
+                num = float(parts[0].strip())
+                den = float(parts[1].strip())
+                if den != 0:
+                    return num / den
+            except Exception:
+                return np.nan
+        try:
+            return float(s)
+        except Exception:
+            return np.nan
+
+    def _nearest_saaty_label(v: float) -> str:
+        return min(option_labels, key=lambda lab: abs(option_values[lab] - v))
     scale_df = pd.DataFrame({
         "Saaty Scale": option_labels,
         "Meaning": [
@@ -825,6 +1166,37 @@ def render_ahp_tab():
                 })
         st.session_state["ahp_pairs"] = pairs
         st.session_state["ahp_pairs_selected"] = list(selected)
+
+    if uploaded_ahp is not None and st.button("Load AHP Matrix from CSV", key="btn_load_ahp_csv"):
+        try:
+            m = pd.read_csv(uploaded_ahp, index_col=0)
+            m.index = [str(x).strip() for x in m.index]
+            m.columns = [str(x).strip() for x in m.columns]
+
+            selected_labels = [label_map[k] for k in selected]
+            missing_rows = [lab for lab in selected_labels if lab not in m.index]
+            missing_cols = [lab for lab in selected_labels if lab not in m.columns]
+            if missing_rows or missing_cols:
+                st.error("Uploaded matrix does not contain all currently selected AHP parameters.")
+            else:
+                m_sel = m.loc[selected_labels, selected_labels]
+                imported_pairs = []
+                for i in range(len(selected_labels)):
+                    for j in range(i + 1, len(selected_labels)):
+                        raw_val = m_sel.iat[i, j]
+                        v = _parse_saaty_value(raw_val)
+                        pref = "1 (Equal)" if pd.isna(v) or v <= 0 else _nearest_saaty_label(v)
+                        imported_pairs.append({
+                            "Criterion A": selected_labels[i],
+                            "Criterion B": selected_labels[j],
+                            "Preference": pref,
+                        })
+                st.session_state["ahp_pairs"] = imported_pairs
+                st.session_state["ahp_pairs_selected"] = list(selected)
+                st.success("AHP matrix imported into the pairwise table.")
+                st.rerun()
+        except Exception as ex:
+            st.error(f"Could not import AHP matrix: {ex}")
 
     pairs_df = pd.DataFrame(st.session_state.get("ahp_pairs", []))
     edited = st.data_editor(
@@ -1151,6 +1523,9 @@ def render_topsis_tab():
 
 with tab_data:
     render_data_tab()
+
+with tab_tools:
+    render_data_tools_tab()
 
 with tab_weights:
     render_direct_weights_tab()

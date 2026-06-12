@@ -1,0 +1,7 @@
+streamlit>=1.31
+pandas>=2.0
+numpy>=1.24
+pyshp>=2.3
+pyproj>=3.6
+folium>=0.16
+streamlit-folium>=0.20

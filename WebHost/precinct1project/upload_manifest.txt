@@ -1,0 +1,25 @@
+Precinct1Project deployment source files
+======================================
+
+Primary Streamlit entrypoint:
+- Support Files/app.py
+
+Upload these into /opt/hydrodecisions/precinct1project/current/:
+- Support Files/app.py
+- Support Files/engine.py
+- Support Files/requirements.txt
+- Support Files/scoring_config.json
+- Support Files/input_template.csv
+- Support Files/HC_P1.jpg
+- Support Files/ITE_Logo.png
+- Support Files/landing_background.png
+- Support Files/Importable Database/
+- Support Files/SHPs/
+
+Do not upload:
+- Support Files/.venv/
+- Support Files/__pycache__/
+- Archive/
+- .git/
+- Start Prioritization Tool.bat
+- WebHost/

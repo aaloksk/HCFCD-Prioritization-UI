@@ -1,0 +1,33 @@
+project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_class,maintenance_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes,svi,Exc_Rain,PipeLength,Road_Riv_ft,Road_ROG_ft,Road_Max,Mean Area Weighted SVI,Mean Area Weighted LMI,ROG_St_Dep,ROG_Are_Dep
+1,White Oak Cir + Pl,subdivision_drainage,12115110,748,4,,,low,,regular,,within_existing_row,,no,,0.755912,2.017964,11166,5546.991749,4977.653234,5546.991749,0.755912,0.628286,0.237566,0.859946
+2,Avenue ABC,subdivision_drainage,9778020,235,5,,,low,,regular,,within_existing_row,,no,,0.331332,2.013512,9012,3888.588492,3812.693147,3888.588492,0.331332,0.390281,1.083419,1.291167
+3,Woodland Oaks,subdivision_drainage,20261290,931,64,,,medium,,regular,,within_existing_row,,no,,0.498694,1.668073,18674,9701.225371,9700.348141,9701.225371,0.498694,0.253084,0.697129,1.022688
+4,Briarcreek,subdivision_drainage,36818390,1764,296,,,medium,,regular,,within_existing_row,,no,,0.438936,2.295996,33934,16604.76006,16604.76006,16604.76006,0.438936,0.399402,0.571881,1.317502
+5,Greenfield Village,subdivision_drainage,48132770,2141,531,,,medium,,regular,,within_existing_row,,no,,0.740655,1.997416,44362,22426.25815,22426.2175,22426.25815,0.740655,0.572556,1.213382,1.783407
+6,Sablechase Dr,subdivision_drainage,28863170,1176,293,,,medium,,regular,,within_existing_row,,no,,0.85429,1.33871,26602,13449.23603,13385.82317,13449.23603,0.85429,0.540464,0.53505,1.33871
+7,Greenbriar Colony,subdivision_drainage,28342370,2133,70,,,medium,,regular,,within_existing_row,,no,,0.714891,2.49056,26122,12521.1784,12521.1784,12521.1784,0.714891,0.709369,0.79513,2.14006
+8,Chaplin/Magee/Gayhart,subdivision_drainage,9964640,648,25,,,low,,regular,,within_existing_row,,no,,0.664653,3.003148,9184,4585.234637,4565.431987,4585.234637,0.664653,0.749762,1.070408,2.604187
+9,Classic Pines,subdivision_drainage,10667720,766,1,,,high,,regular,,within_existing_row,,no,,0.574548,1.188707,9832,4599.847332,4608.020422,4608.020422,0.574548,0.645138,0.294391,1.188707
+10,Westador,subdivision_drainage,20439230,421,93,,,medium,,regular,,within_existing_row,,no,,0.524745,4.125984,18838,8593.444264,8593.444264,8593.444264,0.524745,0.385956,0.956377,2.447935
+11,Oakwood Forest,subdivision_drainage,14091980,468,56,,,medium,,regular,,within_existing_row,,no,,0.624395,0.887288,12988,6287.68369,6108.151257,6287.68369,0.624395,0.580892,0.868356,0.887288
+12,Antoine Dr,subdivision_drainage,28227360,1734,110,,,medium,,regular,,within_existing_row,,no,,0.757627,1.277432,26016,12637.30761,13268.65247,13268.65247,0.757627,0.590316,0.339861,1.276389
+13,Copper Creek/Kleinbrook,subdivision_drainage,44639070,2011,278,,,medium,,regular,,within_existing_row,,no,,0.795445,1.272073,41142,20364.0848,20501.03696,20501.03696,0.795445,0.500527,0.405888,1.272073
+14,Silverleaf,subdivision_drainage,8936060,519,77,,,high,,regular,,within_existing_row,,no,,0.480818,1.12261,8236,4080.928009,4084.548253,4084.548253,0.480818,0.443166,0.393852,1.12261
+15,Silverglen,subdivision_drainage,14113680,814,64,,,high,,regular,,within_existing_row,,no,,0.496499,1.325137,13008,7553.184745,7445.119246,7553.184745,0.496499,0.457312,0.318875,1.22795
+16,Pearl Point,subdivision_drainage,15548050,464,131,,,medium,,regular,,within_existing_row,,no,,0.637171,1.327998,14330,7825.377191,7858.481931,7858.481931,0.637171,0.089883,0.711555,1.327998
+17,Redwood/Greenriver,subdivision_drainage,16988930,361,45,,,medium,,regular,,within_existing_row,,no,,0.862963,3.270186,15658,7226.92236,7378.352822,7378.352822,0.862963,0.524876,1.89504,2.944428
+18,Greensbrook R/P,subdivision_drainage,24970190,1095,69,,,medium,,regular,,within_existing_row,,no,,0.76373,0.831111,23014,11211.74967,11245.38888,11245.38888,0.76373,0.713179,0.328439,0.831111
+19,Greensbrook Place,subdivision_drainage,8265530,353,111,,,high,,regular,,within_existing_row,,no,,0.724581,1.461261,7618,4236.561662,4236.561663,4236.561663,0.724581,0.676621,1.317414,1.461261
+20,Laurel Land,subdivision_drainage,7503860,307,63,,,medium,,regular,,within_existing_row,,no,,0.492266,1.288353,6916,3983.129147,4092.93501,4092.93501,0.492266,0.439454,0.464791,1.288353
+21,Remington Creek Ranch,subdivision_drainage,16554930,679,3,,,high,,regular,,within_existing_row,,no,,0.579979,1.485591,15258,7366.011397,7189.145495,7366.011397,0.579979,0.566609,0.096153,1.294746
+22,Barren/Greenfield/Moorpark,subdivision_drainage,7393190,142,3,,,low,,regular,,within_existing_row,,no,,0.423432,0.964906,6814,1918.818511,2959.549209,2959.549209,0.423432,0.298251,0.806131,0.964906
+23,Woodland Trails West,subdivision_drainage,13864130,508,49,,,medium,,regular,,within_existing_row,,no,,0.492693,1.12127,12778,6507.20818,6479.868981,6507.20818,0.492693,0.250375,0.433495,0.822817
+24,McKamey Meadows,subdivision_drainage,14593250,737,148,,,medium,,regular,,within_existing_row,,no,,0.618971,1.325773,13450,7001.927032,7018.821361,7018.821361,0.618971,0.384306,0.646106,1.325773
+25,Lincoln Green Estates,subdivision_drainage,15788920,1014,55,,,medium,,regular,,within_existing_row,,no,,0.620682,0.966909,14552,7340.41204,7568.482573,7568.482573,0.620682,0.384801,0.159361,0.966909
+26,Silverglen Estates,subdivision_drainage,27849780,1655,30,,,high,,regular,,within_existing_row,,no,,0.533513,1.026854,25668,13422.25972,13667.49341,13667.49341,0.533513,0.491702,0.162581,1.026854
+27,King Lake Forest R/P,subdivision_drainage,26241810,1198,102,,,medium,,regular,,within_existing_row,,no,,0.774543,0.949234,24186,11472.51125,11552.49666,11552.49666,0.774543,0.547062,0.429272,0.948345
+28,Woodgate,subdivision_drainage,15276800,304,118,,,medium,,regular,,within_existing_row,,no,,0.709712,1.730058,14080,7907.62271,7798.316027,7907.62271,0.709712,0.545083,0.951799,1.32816
+29,Morningside Place,subdivision_drainage,32882010,1011,1,,,medium,,regular,,within_existing_row,,no,,0.445176,1.768152,30306,15657.29125,0,15657.29125,0.445176,0.159121,0,0
+30,Brunswick Lake I,subdivision_drainage,10381280,369,1,,,high,,regular,,within_existing_row,,no,,0.413318,0.963746,9568,5416.23275,0,5416.23275,0.413318,0.178494,0,0
+31,Brunswick Lake II,subdivision_drainage,6277810,217,1,,,high,,regular,,within_existing_row,,no,,0.415714,1.347236,5786,3179.779374,0,3179.779374,0.415714,0.179108,0,0
+32,Brunswick Lake III,subdivision_drainage,18837770,560,1,,,high,,regular,,within_existing_row,,no,,0.439678,1.158519,17362,8401.109348,0,8401.109348,0.439678,0.225301,0,0

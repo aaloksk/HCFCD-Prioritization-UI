@@ -1,0 +1,18 @@
+[Unit]
+Description=HydroDecisions Precinct1Project Streamlit App
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/hydrodecisions/precinct1project/current
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/hydrodecisions/precinct1project/venv/bin/streamlit run app.py --server.port 8501 --server.address 127.0.0.1 --server.baseUrlPath Precinct1Project --server.headless true --browser.gatherUsageStats false
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

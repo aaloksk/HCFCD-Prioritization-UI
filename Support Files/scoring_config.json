@@ -1,0 +1,152 @@
+{
+  "weights": {
+    "people_efficiency": 0.15,
+    "structures_efficiency": 0.30,
+    "existing_conditions": 0.20,
+    "svi": 0.20,
+    "maintenance": 0.05,
+    "environment": 0.05,
+    "multiple_benefits": 0.05
+  },
+
+  "efficiency_bins": {
+    "people_cost_per_person": [
+      { "max": 6000, "score": 10 },
+      { "max": 15000, "score": 8 },
+      { "max": 28000, "score": 6 },
+      { "max": 77000, "score": 4 },
+      { "max": 999999999, "score": 1 }
+    ],
+    "structures_cost_per_structure": [
+      { "max": 23000, "score": 10 },
+      { "max": 60000, "score": 8 },
+      { "max": 106000, "score": 6 },
+      { "max": 261000, "score": 4 },
+      { "max": 999999999, "score": 1 }
+    ]
+  },
+
+  "mappings": {
+    "project_type": ["channel_detention", "subdivision_drainage"],
+
+    "svi_class": {
+      "low": 1,
+      "low_moderate": 4,
+      "moderate_high": 7,
+      "high": 10
+    },
+
+    "maintenance_class": {
+      "extensive_specialized": 2,
+      "outside_regular": 6,
+      "regular": 10
+    },
+
+    "existing_conditions_channel_capacity": {
+      "gt_1_percent": 0,
+      "lt_1_percent": 1,
+      "lt_2_percent": 2,
+      "lt_4_percent": 4,
+      "lt_10_percent": 6,
+      "lt_20_percent": 8,
+      "lt_50_percent": 10
+    },
+
+    "existing_conditions_subdivision_matrix": {
+      "low": { "high": 0, "intermediate": 3, "low": 9 },
+      "intermediate": { "high": 3, "intermediate": 6, "low": 9 },
+      "high": { "high": 9, "intermediate": 9, "low": 10 }
+    },
+
+    "environment_channel": {
+      "individual_permit_and_credits": 0,
+      "credits": 2,
+      "avoid_impacts": 6,
+      "minimal_none": 10
+    },
+
+    "row_subdivision": {
+      "needs_additional_row": 6,
+      "within_existing_row": 10
+    },
+
+    "multiple_benefits_channel": {
+      "none": 0,
+      "recreation": 4,
+      "environment": 6,
+      "both": 10
+    },
+
+    "multiple_benefits_subdivision": {
+      "no": 6,
+      "yes": 10
+    }
+  },
+
+  "labels": {
+    "project_type": {
+      "channel_detention": "Channel / Detention Improvement Project",
+      "subdivision_drainage": "Subdivision Drainage Improvement Project"
+    },
+
+    "svi_class": {
+      "low": "Low",
+      "low_moderate": "Low–Moderate",
+      "moderate_high": "Moderate–High",
+      "high": "High"
+    },
+
+    "maintenance_class": {
+      "extensive_specialized": "Extensive & Specialized Maintenance",
+      "outside_regular": "Maintenance Outside Regular HCFCD Activities",
+      "regular": "Regular Maintenance (within typical HCFCD activities)"
+    },
+
+    "existing_conditions_channel_capacity": {
+      "gt_1_percent": "Greater than 1% annual chance capacity (meets/exceeds 1% level of service)",
+      "lt_1_percent": "Less than 1% annual chance capacity",
+      "lt_2_percent": "Less than 2% annual chance capacity",
+      "lt_4_percent": "Less than 4% annual chance capacity",
+      "lt_10_percent": "Less than 10% annual chance capacity",
+      "lt_20_percent": "Less than 20% annual chance capacity",
+      "lt_50_percent": "Less than 50% annual chance capacity"
+    },
+
+    "existing_conditions_subdivision_matrix": {
+      "excess_rainfall_class": {
+        "low": "Low Excess Rainfall",
+        "intermediate": "Intermediate Excess Rainfall",
+        "high": "High Excess Rainfall"
+      },
+      "drainage_infra_quality": {
+        "high": "High Drainage Infrastructure Quality",
+        "intermediate": "Intermediate Drainage Infrastructure Quality",
+        "low": "Low Drainage Infrastructure Quality"
+      }
+    },
+
+    "environment_channel": {
+      "individual_permit_and_credits": "Individual Permit Required and Mitigation Credits Required",
+      "credits": "Mitigation Credits Required",
+      "avoid_impacts": "Avoid Impacts to Waters of the U.S.",
+      "minimal_none": "Minimal / No Environmental Impacts Expected"
+    },
+
+    "row_subdivision": {
+      "needs_additional_row": "Project Requires Additional Right-of-Way (ROW)",
+      "within_existing_row": "Project Can Be Built Within Existing Right-of-Way (ROW)"
+    },
+
+    "multiple_benefits_channel": {
+      "none": "No Additional Benefits",
+      "recreation": "Potential for Recreational Benefits",
+      "environment": "Potential for Environmental Benefits",
+      "both": "Potential for Recreational and Environmental Benefits"
+    },
+
+    "multiple_benefits_subdivision": {
+      "no": "Does Not Benefit from Nearby District Channel/Detention Improvement",
+      "yes": "Benefits from Nearby District Channel/Detention Improvement"
+    }
+  }
+}

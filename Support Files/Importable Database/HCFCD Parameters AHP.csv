@@ -1,0 +1,8 @@
+Parameter,Resident Benefits Efficiency,Structure Benefit Efficiency,Existing Conditions,Social Vulnerability Index,Long-Term Maintenance Costs,Minimizes Environmental Impacts,Potential for Multiple Benefits
+Resident Benefits Efficiency,1,3,9,7,7,7,7
+Structure Benefit Efficiency,,1,7,5,5,5,5
+Existing Conditions,,,1,1,3,3,3
+Social Vulnerability Index,,,,1,5,5,5
+Long-Term Maintenance Costs,,,,,1,1,0.5
+Minimizes Environmental Impacts,,,,,,1,3
+Potential for Multiple Benefits,,,,,,,1

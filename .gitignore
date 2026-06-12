@@ -1,0 +1,19 @@
+.venv/
+*/.venv/
+__pycache__/
+*/__pycache__/
+*.py[cod]
+
+# Build and packaged outputs
+build/
+dist/
+EXE/
+*.spec
+
+# Local archives and duplicate root-level data copies
+Archive/
+/Importable Database/
+
+# Local runtime/log artifacts
+*.log
+access_history.*

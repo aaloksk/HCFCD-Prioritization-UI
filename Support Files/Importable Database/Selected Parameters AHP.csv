@@ -1,0 +1,8 @@
+Parameter,Maximum Flooding Depth,Existing Conditions,Total Benefiting Population,Resident Benefits Efficiency,Structure Benefit Efficiency,Social Vulnerability Index,LMI
+Maximum Flooding Depth,1,3,0.2,0.333333333,0.333333333,0.333333333,3
+Existing Conditions,,1,0.333333333,0.2,0.2,0.333333333,0.5
+Total Benefiting Population,,,1,1,3,0.333333333,3
+Resident Benefits Efficiency,,,,1,1,3,3
+Structure Benefit Efficiency,,,,,1,3,2
+Social Vulnerability Index,,,,,,1,5
+LMI,,,,,,,1

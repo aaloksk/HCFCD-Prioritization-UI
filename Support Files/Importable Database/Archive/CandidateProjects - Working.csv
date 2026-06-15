@@ -1,0 +1,14 @@
+project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_class,maintenance_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes,svi,Exc_Rain,Mean_10YR_Flood_Depth_Mean,Sum_10YR_Flooded_Area_SF
+1,PINE VILLAGE,subdivision_drainage,4366647,395,10,,,medium,moderate_high,regular,,within_existing_row,,no,,0.647333,0.518937,0.313858,5405.8419
+2,THE COLONY,subdivision_drainage,1409105,139,2,,,low,moderate_high,regular,,within_existing_row,,no,,0.74397,0.383832,0.01,0.01
+3,STONEFIELD TERRACE,subdivision_drainage,3566045,244,8,,,high,moderate_high,regular,,within_existing_row,,no,,0.584636,0.698425,0.788021,16943.5483
+4,SHELDON PARK,subdivision_drainage,3286924,212,1,,,low,moderate_high,regular,,within_existing_row,,no,,0.624609,0.17019,0.53786,12375.6572
+5,FALL CREEK,subdivision_drainage,5180210,344,16,,,high,low,regular,,within_existing_row,,no,,0.24058,1.061195,0.01,0.01
+6,INVERNESS FOREST,subdivision_drainage,9757572,726,34,,,medium,moderate_high,regular,,within_existing_row,,no,,0.631035,0.57875,0.01,0.01
+7,URBAN ACRES,subdivision_drainage,1890535,72,14,,,low,high,regular,,within_existing_row,,no,,0.772246,0.753753,0.348439,2863.29303
+8,SHELDON WOODS,subdivision_drainage,7133525,708,1,,,medium,moderate_high,regular,,within_existing_row,,no,,0.592718,0.28709,1.795512,22365.9372
+9,INWOOD NORTH,subdivision_drainage,11237887,931,105,,,medium,moderate_high,regular,,within_existing_row,,no,,0.724944,0.843324,0.244572,1134.77625
+10,GREENWOOD FOREST,subdivision_drainage,27153723,3528,224,,,medium,low_moderate,regular,,within_existing_row,,no,,0.390886,0.979133,3.123975,66845.3711
+11,SHADOWLAKE ESTATES,subdivision_drainage,4491799,143,19,,,low,high,regular,,within_existing_row,,no,,0.787487,0.71726,0.01329,60.764908
+12,FAUNA ESTATES,subdivision_drainage,7348124,240,17,,,low,low_moderate,regular,,within_existing_row,,no,,0.300859,0.901019,0.35253,546035.493
+13,GATEWAY PLACE,subdivision_drainage,10296348,279,25,,,low,moderate_high,regular,,within_existing_row,,no,,0.551147,0.729549,0.6124,239815.051

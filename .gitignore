@@ -13,7 +13,10 @@ EXE/
 # Local archives and duplicate root-level data copies
 Archive/
 /Importable Database/
+!Support Files/Importable Database/Archive/
+!Support Files/Importable Database/Archive/**
 
 # Local runtime/log artifacts
 *.log
 access_history.*
+Support Files/Importable Database/Selected Parameters AHP.csv

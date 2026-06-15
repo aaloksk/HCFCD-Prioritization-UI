@@ -1,0 +1,15 @@
+project_id,project_name,project_type,total_cost,people_benefitted,structures_benefitted,channel_capacity_class,excess_rainfall_class,drainage_infra_quality,svi_class,maintenance_class,environment_channel_class,row_subdivision_class,multiple_benefits_channel_class,district_improvement_synergy,notes,apple,ball,cat,Mean_10YR_Flood_Depth_Mean,Sum_10YR_Flooded_Area_SF
+1,GREENWOOD FOREST,subdivision_drainage,25512000,25000,900,,intermediate,medium,high,regular,,within_existing_row,,no,,,,,3.123975,66845.3711
+2,PINE VILLAGE,subdivision_drainage,4366647,21035,1097,,intermediate,high,low,regular,,within_existing_row,,no,,,,,0.313858,5405.8419
+3,THE COLONY,subdivision_drainage,1409105,447664,504,,intermediate,low,moderate_high,regular,,within_existing_row,,no,,,,,0.01,0.01
+4,STONEFIELD TERRACE,subdivision_drainage,3566045,18122,2826,,intermediate,high,low_moderate,regular,,within_existing_row,,no,,,,,0.788021,16943.5483
+5,SHELDON PARK,subdivision_drainage,3286924,112843,1958,,low,low,moderate_high,regular,,within_existing_row,,no,,,,,0.53786,12375.6572
+6,FALL CREEK,subdivision_drainage,5180210,115375,4730,,high,medium,low_moderate,regular,,within_existing_row,,no,,,,,0.01,0.01
+7,INVERNESS FOREST,subdivision_drainage,9757572,365774,3913,,high,low,low,regular,,within_existing_row,,no,,,,,0.01,0.01
+8,URBAN ACRES,subdivision_drainage,1890535,392741,4711,,high,medium,low_moderate,regular,,within_existing_row,,no,,,,,0.348439,2863.29303
+9,SHELDON WOODS,subdivision_drainage,7133525,386182,4441,,low,high,moderate_high,regular,,within_existing_row,,no,,,,,1.795512,22365.9372
+10,INWOOD NORTH,subdivision_drainage,11237887,151535,2931,,intermediate,high,low,regular,,within_existing_row,,no,,,,,0.244572,1134.77625
+11,GREENWOOD FOREST,subdivision_drainage,27153723,175008,4306,,low,low,moderate_high,regular,,within_existing_row,,no,,,,,3.123975,66845.3711
+12,SHADOWLAKE ESTATES,subdivision_drainage,4491799,378625,2026,,intermediate,medium,high,regular,,within_existing_row,,no,,,,,0.01329,60.764908
+13,FAUNA ESTATES,subdivision_drainage,7348124,371910,2518,,low,medium,low,regular,,within_existing_row,,no,,,,,0.35253,546035.493
+14,GATEWAY PLACE,subdivision_drainage,10296348,226474,806,,low,high,moderate_high,regular,,within_existing_row,,no,,,,,0.6124,239815.051

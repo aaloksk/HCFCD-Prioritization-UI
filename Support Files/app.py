@@ -106,7 +106,17 @@ def get_importable_database_files(extensions: tuple[str, ...] = (".csv",)) -> li
 
 
 def get_importable_workspace_json_files() -> list[tuple[str, str]]:
-    return get_importable_database_files(extensions=(".json",))
+    workspace_files = []
+    for name, path in get_importable_database_files(extensions=(".json",)):
+        try:
+            with open(path, "r", encoding="utf-8") as jf:
+                payload = json.load(jf)
+            df_blob = payload.get("df_work", {}) if isinstance(payload, dict) else {}
+            if isinstance(df_blob, dict) and "data" in df_blob and "columns" in df_blob:
+                workspace_files.append((name, path))
+        except Exception:
+            continue
+    return workspace_files
 
 
 def get_database_csv_files() -> list[tuple[str, str]]:
@@ -121,7 +131,7 @@ def get_ahp_csv_files() -> list[tuple[str, str]]:
     return [
         (name, path)
         for name, path in get_importable_database_files(extensions=(".csv",))
-        if "ahp" in str(name).lower()
+        if "ahp" in str(name).lower() and "final" in str(name).lower()
     ]
 
 
@@ -889,9 +899,13 @@ def load_ahp_matrix_pairs(csv_source, selected: list[str], label_map: dict[str, 
         ("1/9 (Extreme)", 1/9),
         ("1/7 (Very strong)", 1/7),
         ("1/5 (Strong)", 1/5),
+        ("1/4 (Between moderate and strong)", 1/4),
         ("1/3 (Moderate)", 1/3),
+        ("1/2 (Between equal and moderate)", 1/2),
         ("1 (Equal)", 1.0),
+        ("2 (Between equal and moderate)", 2.0),
         ("3 (Moderate)", 3.0),
+        ("4 (Between moderate and strong)", 4.0),
         ("5 (Strong)", 5.0),
         ("7 (Very strong)", 7.0),
         ("9 (Extreme)", 9.0),
@@ -1215,6 +1229,57 @@ def recalculate_efficiency_classes(df_in: pd.DataFrame) -> tuple[pd.DataFrame, d
         new_vals = struct_class.astype(str)
         df["structures_efficiency_class"] = new_vals
         changes["structures_efficiency_class"] = int((old_vals != new_vals).sum())
+
+    return df, changes
+
+
+def auto_prepare_dataset(df_in: pd.DataFrame, overwrite: bool = True) -> tuple[pd.DataFrame, dict]:
+    """Run the common one-click preparation steps used before scoring/ranking."""
+    df = preprocess_uploaded_df(df_in)
+    changes = {
+        "svi_class": 0,
+        "people_efficiency_class": 0,
+        "structures_efficiency_class": 0,
+        "excess_rainfall_class": 0,
+        "excess_rainfall_source": "",
+    }
+
+    rain_source_col = find_column_by_aliases(
+        df,
+        [
+            "excess_rainfall",
+            "Excess Rainfall",
+            "excess rainfall",
+            "Exc_Rain",
+            "EXC_RAIN",
+            "maximum flood depth",
+            "Maximum Flood Depth (ft)",
+            "Maximum Flooding Depth",
+        ],
+    )
+    if rain_source_col is None:
+        rain_source_col = find_column_by_contains(df, "excess rainfall")
+
+    if rain_source_col is not None:
+        _, rain_class = classify_excess_rainfall_series(df[rain_source_col])
+        if "excess_rainfall_class" not in df.columns:
+            df["excess_rainfall_class"] = ""
+        if overwrite:
+            target_mask = pd.Series(True, index=df.index)
+        else:
+            target_mask = df["excess_rainfall_class"].apply(_is_missing_series_value)
+        fill_mask = target_mask & rain_class.ne("")
+        df.loc[fill_mask, "excess_rainfall_class"] = rain_class[fill_mask]
+        changes["excess_rainfall_class"] = int(fill_mask.sum())
+        changes["excess_rainfall_source"] = rain_source_col
+
+    df, derived_changes = auto_fill_derived_classes(df, overwrite=overwrite)
+    for k, v in derived_changes.items():
+        changes[k] = changes.get(k, 0) + int(v)
+
+    df, eff_changes = recalculate_efficiency_classes(df)
+    for k, v in eff_changes.items():
+        changes[k] = int(v)
 
     return df, changes
 
@@ -2053,6 +2118,23 @@ st.markdown(
         margin-top: 0rem;
         margin-bottom: 0.16rem;
     }
+    .st-key-ahp_importable_matrix {
+        background: #edf6ff;
+        border: 2px solid #3f7fb5;
+        border-radius: 10px;
+        padding: 12px 14px 14px 14px;
+        margin: 10px 0 12px 0;
+        box-shadow: 0 2px 8px rgba(63, 127, 181, 0.12);
+    }
+    .st-key-ahp_importable_matrix label p {
+        color: #1d4f78;
+        font-size: 1.03rem;
+        font-weight: 800;
+    }
+    .st-key-ahp_importable_matrix [data-baseweb="select"] > div {
+        background: #ffffff;
+        border-color: #3f7fb5;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -2159,6 +2241,7 @@ if uploaded_sidebar is not None:
         st.session_state["uploaded_file_name"] = uploaded_sidebar.name
         st.session_state["loaded_sidebar_upload_id"] = upload_id
         st.session_state["svi_source_force_reset"] = True
+        st.session_state.pop("project_data_editor", None)
 
 if "df_work" not in st.session_state:
     default_db_files = get_database_csv_files()
@@ -2232,6 +2315,7 @@ def render_data_tab():
                     st.session_state["loaded_main_upload_id"] = None
                     st.session_state["loaded_sidebar_upload_id"] = None
                     st.session_state["svi_source_force_reset"] = True
+                    st.session_state.pop("project_data_editor", None)
                     st.rerun()
     with col_u2:
         if st.button("Load template dataset", key="btn_load_template_main"):
@@ -2239,11 +2323,13 @@ def render_data_tab():
             st.session_state["uploaded_file_name"] = "input_template.csv"
             st.session_state["loaded_main_upload_id"] = None
             st.session_state["svi_source_force_reset"] = True
+            st.session_state.pop("project_data_editor", None)
         if st.button("Clear current dataset", key="btn_clear_dataset"):
             st.session_state["df_work"] = st.session_state["df_work"].head(0)
             st.session_state["uploaded_file_name"] = "cleared"
             st.session_state["loaded_main_upload_id"] = None
             st.session_state["svi_source_force_reset"] = True
+            st.session_state.pop("project_data_editor", None)
     if uploaded_main is not None:
         uploaded_df, upload_id = read_uploaded_csv_with_id(uploaded_main)
         if st.session_state.get("loaded_main_upload_id") != upload_id:
@@ -2251,6 +2337,7 @@ def render_data_tab():
             st.session_state["uploaded_file_name"] = uploaded_main.name
             st.session_state["loaded_main_upload_id"] = upload_id
             st.session_state["svi_source_force_reset"] = True
+            st.session_state.pop("project_data_editor", None)
 
     current_name = st.session_state.get("uploaded_file_name", "") or "session data"
     st.caption(f"Current dataset: {current_name}")
@@ -2647,6 +2734,28 @@ def render_data_tools_tab():
                             st.error(f"Could not load selected JSON as workspace: {ex}")
             else:
                 st.caption("No JSON files found in Importable Database folder.")
+
+    if not df_local.empty:
+        st.markdown("#### One-Click Dataset Preparation")
+        st.caption(
+            "Runs SVI reclassification, excess-rainfall classification when a source column is found, "
+            "and recalculates people/structure efficiency classes."
+        )
+        if st.button("Prepare Dataset for Scoring", key="btn_prepare_dataset_for_scoring"):
+            df_prepared, prep_changes = auto_prepare_dataset(df_local, overwrite=True)
+            st.session_state["df_work"] = df_prepared
+            st.session_state.pop("project_data_editor", None)
+            rain_source = prep_changes.get("excess_rainfall_source") or "not found"
+            st.success(
+                "Dataset prepared. "
+                f"SVI classes updated: {prep_changes.get('svi_class', 0)}; "
+                f"people efficiency updates: {prep_changes.get('people_efficiency_class', 0)}; "
+                f"structure efficiency updates: {prep_changes.get('structures_efficiency_class', 0)}; "
+                f"excess rainfall classes updated: {prep_changes.get('excess_rainfall_class', 0)} "
+                f"(source: {rain_source})."
+            )
+            st.rerun()
+
     if df_local.empty:
         return
 
@@ -4223,14 +4332,129 @@ def render_ahp_tab():
     criteria_keys = [k for k, _ in meta]
     standard_criteria_keys = [k for k, _ in BASE_CRITERIA_META if k in criteria_keys]
 
-    if st.button("Use Standard HCFCD Criteria", key="btn_ahp_use_standard_hcfcd"):
-        st.session_state["ahp_selected_criteria"] = standard_criteria_keys
-        st.rerun()
+    def _criteria_key_from_label(target_label: str, label_map_local: dict[str, str], criteria_keys_local: list[str]) -> str | None:
+        target_norm = _norm_col_name(target_label)
+        for key_local in criteria_keys_local:
+            aliases = [key_local, label_map_local.get(key_local, "")]
+            if SCORE_COL_MAP.get(key_local):
+                aliases.append(SCORE_COL_MAP[key_local])
+            if any(_norm_col_name(a) == target_norm for a in aliases if a):
+                return key_local
+        return None
+
+    def _ensure_custom_criterion_for_label(target_label: str) -> str | None:
+        alias_map = {
+            "10YR Flood Depth": [
+                "Mean_10YR_Flood_Depth_Mean",
+                "Mean 10 YR Flood Depth Mean",
+                "10YR Flood Depth",
+                "10 YR Flood Depth",
+            ],
+            "Total Benefiting Population": ["Total Benefiting Population"],
+            "Maximum Flooding Depth": ["Maximum Flooding Depth"],
+            "LMI": ["LMI"],
+        }
+        aliases = alias_map.get(target_label, [target_label])
+        df_current = st.session_state.get("df_work", pd.DataFrame())
+        has_df = isinstance(df_current, pd.DataFrame) and not df_current.empty
+        matched_col = find_column_by_aliases(df_current, aliases) if has_df else None
+
+        # Known preset fields should remain selectable even if the current session
+        # still has an older dataset loaded. Ranking will use the column once the
+        # updated candidate database is loaded.
+        if not matched_col and target_label in alias_map:
+            matched_col = aliases[0]
+        if not matched_col:
+            return None
+
+        custom_criteria = list(st.session_state.get("custom_criteria", []))
+        existing = {c.get("key"): c for c in custom_criteria if c.get("key")}
+        if matched_col not in existing:
+            dtype = (
+                "Number"
+                if has_df and matched_col in df_current.columns and pd.api.types.is_numeric_dtype(df_current[matched_col])
+                else "Number"
+            )
+            custom_criteria.append({
+                "key": matched_col,
+                "label": target_label,
+                "include": True,
+                "type": dtype,
+            })
+            st.session_state["custom_criteria"] = custom_criteria
+            if matched_col not in st.session_state["weights_pct"]:
+                st.session_state["weights_pct"][matched_col] = 0.0
+        return matched_col
+
+    def _preset_keys_from_ahp_file(file_name: str) -> list[str]:
+        db_lookup = dict(get_ahp_csv_files())
+        file_path = db_lookup.get(file_name)
+        if not file_path:
+            return []
+
+        with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
+            header = f.readline().strip().split(",")
+        preset_labels = [h.strip() for h in header[1:] if h.strip()]
+
+        resolved_keys = []
+        local_meta = get_criteria_meta()
+        local_label_map = {k: v for k, v in local_meta}
+        local_keys = [k for k, _ in local_meta]
+        for preset_label in preset_labels:
+            resolved = _criteria_key_from_label(preset_label, local_label_map, local_keys)
+            if resolved is None:
+                resolved = _ensure_custom_criterion_for_label(preset_label)
+                if resolved:
+                    local_meta = get_criteria_meta()
+                    local_label_map = {k: v for k, v in local_meta}
+                    local_keys = [k for k, _ in local_meta]
+            if resolved and resolved not in resolved_keys:
+                resolved_keys.append(resolved)
+        return resolved_keys
+
+    p1, p2, _ = st.columns([1.35, 1.6, 3.0])
+    with p1:
+        if st.button("Use HCFCD Parameters", key="btn_ahp_use_standard_hcfcd"):
+            st.session_state["ahp_selected_criteria"] = standard_criteria_keys
+            st.session_state["ahp_importable_matrix"] = "HCFCD Parameters AHP Final.csv"
+            st.session_state["ahp_matrix_criteria_source"] = "HCFCD Parameters AHP Final.csv"
+            st.session_state.pop("ahp_importable_loaded_sig", None)
+            st.session_state["topsis_sync_from_ahp"] = True
+            st.rerun()
+    with p2:
+        if st.button("Use Preset Selected Parameters", key="btn_ahp_use_selected_parameters"):
+            preset_keys = _preset_keys_from_ahp_file("Selected Parameters AHP Final.csv")
+            if preset_keys:
+                st.session_state["ahp_selected_criteria"] = preset_keys
+                st.session_state["ahp_importable_matrix"] = "Selected Parameters AHP Final.csv"
+                st.session_state["ahp_matrix_criteria_source"] = "Selected Parameters AHP Final.csv"
+                st.session_state.pop("ahp_importable_loaded_sig", None)
+                st.session_state["topsis_sync_from_ahp"] = True
+                st.rerun()
+            else:
+                st.warning("Could not match the preset selected parameters to current criteria.")
+
+    meta = get_criteria_meta()
+    label_map = {k: v for k, v in meta}
+    criteria_keys = [k for k, _ in meta]
+    pending_ahp_selection = st.session_state.pop("pending_ahp_selected_criteria", None)
+    if pending_ahp_selection:
+        st.session_state["ahp_selected_criteria"] = [
+            k for k in pending_ahp_selection
+            if k in criteria_keys
+        ]
+    current_ahp_selection = [
+        k for k in st.session_state.get("ahp_selected_criteria", [])
+        if k in criteria_keys
+    ]
+    if not current_ahp_selection:
+        current_ahp_selection = criteria_keys
+    st.session_state["ahp_selected_criteria"] = current_ahp_selection
 
     selected = st.multiselect(
         "Select criteria for AHP",
         options=criteria_keys,
-        default=criteria_keys,
+        default=current_ahp_selection,
         format_func=lambda k: label_map.get(k, k),
         key="ahp_selected_criteria",
     )
@@ -4271,17 +4495,27 @@ def render_ahp_tab():
             key="ahp_download_selected",
         )
 
-    uploaded_ahp = st.file_uploader("Import completed AHP matrix CSV", type=["csv"], key="ahp_upload_matrix")
     importable_ahp = get_ahp_csv_files()
     if importable_ahp:
         ahp_names = [n for n, _ in importable_ahp]
         default_ahp_name = _default_database_name(importable_ahp, token="ahp")
+        if st.session_state.get("ahp_importable_matrix") not in ahp_names:
+            st.session_state["ahp_importable_matrix"] = default_ahp_name if default_ahp_name in ahp_names else ahp_names[0]
         selected_ahp_db = st.selectbox(
-            "Or load AHP matrix from Importable Database",
+            "Load AHP matrix from Importable Database",
             options=ahp_names,
             index=ahp_names.index(default_ahp_name) if default_ahp_name in ahp_names else 0,
             key="ahp_importable_matrix",
         )
+        if st.session_state.get("ahp_matrix_criteria_source") != selected_ahp_db:
+            preset_keys_for_db = _preset_keys_from_ahp_file(selected_ahp_db)
+            if preset_keys_for_db:
+                st.session_state["pending_ahp_selected_criteria"] = preset_keys_for_db
+                st.session_state["ahp_matrix_criteria_source"] = selected_ahp_db
+                st.session_state.pop("ahp_importable_loaded_sig", None)
+                st.session_state["topsis_sync_from_ahp"] = True
+                st.rerun()
+    uploaded_ahp = st.file_uploader("Or import completed AHP matrix CSV", type=["csv"], key="ahp_upload_matrix")
 
     if len(selected) < 2:
         st.warning("Select at least two criteria to run AHP.")
@@ -4308,9 +4542,13 @@ def render_ahp_tab():
         ("1/9 (Extreme)", 1/9),
         ("1/7 (Very strong)", 1/7),
         ("1/5 (Strong)", 1/5),
+        ("1/4 (Between moderate and strong)", 1/4),
         ("1/3 (Moderate)", 1/3),
+        ("1/2 (Between equal and moderate)", 1/2),
         ("1 (Equal)", 1.0),
+        ("2 (Between equal and moderate)", 2.0),
         ("3 (Moderate)", 3.0),
+        ("4 (Between moderate and strong)", 4.0),
         ("5 (Strong)", 5.0),
         ("7 (Very strong)", 7.0),
         ("9 (Extreme)", 9.0),
@@ -4343,9 +4581,13 @@ def render_ahp_tab():
             "Criterion A is extremely less important than B",
             "Criterion A is very strongly less important than B",
             "Criterion A is strongly less important than B",
+            "Criterion A is between strongly and moderately less important than B",
             "Criterion A is moderately less important than B",
+            "Criterion A is between equally and moderately less important than B",
             "Criteria A and B are equally important",
+            "Criterion A is between equally and moderately more important than B",
             "Criterion A is moderately more important than B",
+            "Criterion A is between moderately and strongly more important than B",
             "Criterion A is strongly more important than B",
             "Criterion A is very strongly more important than B",
             "Criterion A is extremely more important than B",
@@ -4380,6 +4622,10 @@ def render_ahp_tab():
                     st.session_state["ahp_pairs"] = imported_pairs
                     st.session_state["ahp_pairs_selected"] = list(selected)
                     st.session_state["ahp_pairs_editor_version"] = st.session_state.get("ahp_pairs_editor_version", 0) + 1
+                    imported_weights, imported_cr = _compute_ahp_from_pair_rows(imported_pairs, selected, option_values, label_map)
+                    st.session_state["ahp_weights"] = imported_weights
+                    st.session_state["ahp_cr"] = imported_cr
+                    st.session_state["ahp_selected_snapshot"] = list(selected)
                     st.session_state["ahp_import_summary"] = {
                         "imported_count": imported_count,
                         "defaulted_count": defaulted_count,
@@ -4405,6 +4651,10 @@ def render_ahp_tab():
                 st.session_state["ahp_pairs"] = imported_pairs
                 st.session_state["ahp_pairs_selected"] = list(selected)
                 st.session_state["ahp_pairs_editor_version"] = st.session_state.get("ahp_pairs_editor_version", 0) + 1
+                imported_weights, imported_cr = _compute_ahp_from_pair_rows(imported_pairs, selected, option_values, label_map)
+                st.session_state["ahp_weights"] = imported_weights
+                st.session_state["ahp_cr"] = imported_cr
+                st.session_state["ahp_selected_snapshot"] = list(selected)
                 st.session_state["ahp_import_summary"] = {
                     "imported_count": imported_count,
                     "defaulted_count": defaulted_count,
@@ -4471,7 +4721,11 @@ def render_topsis_tab():
     st.subheader("Ranking")
     st.write("Select criteria, then choose a ranking method.")
 
-    weights_pct = st.session_state.get("weights_pct", {k: float(v) * 100.0 for k, v in config["weights"].items()})
+    default_weights_pct = {k: float(v) * 100.0 for k, v in config["weights"].items()}
+    weights_pct = {
+        **default_weights_pct,
+        **st.session_state.get("weights_pct", {}),
+    }
     weights_dec = {k: round(float(v) / 100.0, 6) for k, v in weights_pct.items()}
     config_run = copy.deepcopy(config)
     config_run["weights"] = weights_dec
@@ -4522,13 +4776,53 @@ def render_topsis_tab():
         if key:
             label_by_col[key] = label
 
+    custom_label_to_key = {}
+    for item in st.session_state.get("custom_criteria", []):
+        key = item.get("key")
+        label = item.get("label") or item.get("key")
+        if key and label:
+            custom_label_to_key[_norm_col_name(label)] = key
+
+    def _ranking_col_from_ahp_key(k: str) -> str | None:
+        score_col = SCORE_COL_MAP.get(k)
+        if score_col in available_cols:
+            return score_col
+        if k in available_cols:
+            return k
+        custom_key = custom_label_to_key.get(_norm_col_name(k))
+        if custom_key in available_cols:
+            return custom_key
+
+        # Fall back to matching labels and column names. This keeps AHP presets usable
+        # when criteria were created from dataset columns instead of framework scores.
+        norm_target = _norm_col_name(k)
+        criteria_label_map = {key: label for key, label in get_criteria_meta()}
+        if k in criteria_label_map:
+            norm_target = _norm_col_name(criteria_label_map[k])
+        for col in available_cols:
+            aliases = [col, label_by_col.get(col, "")]
+            if any(_norm_col_name(alias) == norm_target for alias in aliases if alias):
+                return col
+        return None
+
+    if st.session_state.get("topsis_sync_from_ahp"):
+        ahp_order = st.session_state.get("ahp_selected_criteria", [])
+        ordered_cols = []
+        for k in ahp_order:
+            c = _ranking_col_from_ahp_key(k)
+            if c in available_cols and c not in ordered_cols:
+                ordered_cols.append(c)
+        if ordered_cols:
+            st.session_state["topsis_selected_cols"] = ordered_cols
+        st.session_state["topsis_sync_from_ahp"] = False
+
     btn_col_1, btn_col_2 = st.columns(2)
     with btn_col_1:
         if st.button("Use AHP-selected criteria order", key="btn_use_ahp_order"):
             ahp_order = st.session_state.get("ahp_selected_criteria", [])
             ordered_cols = []
             for k in ahp_order:
-                c = SCORE_COL_MAP.get(k, k)
+                c = _ranking_col_from_ahp_key(k)
                 if c in available_cols and c not in ordered_cols:
                     ordered_cols.append(c)
             if ordered_cols:
@@ -4650,6 +4944,19 @@ def render_topsis_tab():
     settings_df = pd.DataFrame(st.session_state.get("topsis_settings", []))
     if "Criterion" not in settings_df.columns:
         settings_df = pd.DataFrame(columns=["Criterion", "Type"])
+
+    display_label_by_col = {v: f"Score - {label}" for k, label in BASE_CRITERIA_META for v in [SCORE_COL_MAP.get(k)] if v}
+    for item in st.session_state.get("custom_criteria", []):
+        key = item.get("key")
+        label = item.get("label") or item.get("key")
+        if key:
+            display_label_by_col[key] = label
+    col_by_display_label = {v: k for k, v in display_label_by_col.items()}
+
+    # Older session state may have stored display labels instead of internal
+    # column names. Convert back before filtering, otherwise TOPSIS settings
+    # can lose rows and misalign ideal best/worst arrays.
+    settings_df["Criterion"] = settings_df["Criterion"].map(lambda c: col_by_display_label.get(c, c))
     settings_df = settings_df[settings_df["Criterion"].isin(selected_cols)]
     if "Better Value" in settings_df.columns and "Type" not in settings_df.columns:
         settings_df["Type"] = settings_df["Better Value"].apply(
@@ -4658,26 +4965,42 @@ def render_topsis_tab():
     if "Better Value" in settings_df.columns:
         settings_df = settings_df.drop(columns=["Better Value"])
 
-    label_by_col = {v: f"Score - {label}" for k, label in BASE_CRITERIA_META for v in [SCORE_COL_MAP.get(k)] if v}
-    for item in st.session_state.get("custom_criteria", []):
-        key = item.get("key")
-        label = item.get("label") or item.get("key")
-        if key:
-            label_by_col[key] = label
-    settings_df["Criterion"] = settings_df["Criterion"].map(lambda c: label_by_col.get(c, c))
+    if len(settings_df) != len(selected_cols):
+        existing_settings = {
+            str(row.get("Criterion", "")): str(row.get("Type", "Benefit"))
+            for _, row in settings_df.iterrows()
+        }
+        settings_df = pd.DataFrame([
+            {
+                "Criterion": c,
+                "Type": existing_settings.get(c, "Benefit"),
+            }
+            for c in selected_cols
+        ])
+        st.session_state["topsis_settings"] = settings_df.to_dict("records")
+        st.session_state["topsis_settings_editor_version"] = st.session_state.get("topsis_settings_editor_version", 0) + 1
+        st.session_state.pop("topsis_results_multi", None)
+
+    label_by_col = display_label_by_col
 
     edited = None
     if any(m.endswith("+ TOPSIS") for m in methods):
         st.caption("Type: Benefit = higher is better, Cost = lower is better.")
-        edited = st.data_editor(
-            settings_df,
+        settings_display_df = settings_df.copy()
+        settings_display_df["Criterion"] = settings_display_df["Criterion"].map(lambda c: label_by_col.get(c, c))
+        settings_editor_key = f"topsis_settings_table_{st.session_state.get('topsis_settings_editor_version', 0)}"
+        edited_display = st.data_editor(
+            settings_display_df,
             use_container_width=True,
             hide_index=True,
-            key="topsis_settings_table",
+            key=settings_editor_key,
             column_config={
+                "Criterion": st.column_config.TextColumn(disabled=True),
                 "Type": st.column_config.SelectboxColumn(options=["Benefit", "Cost"]),
             },
         )
+        edited = edited_display.copy()
+        edited["Criterion"] = edited["Criterion"].map(lambda c: col_by_display_label.get(c, c))
         st.session_state["topsis_settings"] = edited.to_dict("records")
 
     if st.button("Run Ranking", key="btn_run_topsis", type="primary"):
@@ -4726,10 +5049,9 @@ def render_topsis_tab():
             ideal_best = []
             ideal_worst = []
 
-            label_to_col = {v: k for k, v in label_by_col.items()}
             missing_rows = 0
             for _, row in edited.iterrows():
-                c = label_to_col.get(row["Criterion"], row["Criterion"])
+                c = row["Criterion"]
                 if c not in selected_cols:
                     missing_rows += 1
                     continue
@@ -4745,15 +5067,26 @@ def render_topsis_tab():
                 ideal_worst.append(float(worst_val))
 
             if missing_rows or len(benefit_flags) != len(selected_cols):
+                edited_cols = set(edited["Criterion"].tolist()) if isinstance(edited, pd.DataFrame) and "Criterion" in edited.columns else set()
                 for c in selected_cols:
                     if len(benefit_flags) >= len(selected_cols):
                         break
-                    if c not in [label_to_col.get(r["Criterion"], r["Criterion"]) for _, r in edited.iterrows()]:
+                    if c not in edited_cols:
                         benefit_flags.append(True)
                         ideal_best.append(float(data[c].max()))
                         ideal_worst.append(float(data[c].min()))
 
             inv_score_map = {v: k for k, v in SCORE_COL_MAP.items()}
+
+            def _ahp_key_for_ranking_col(col: str, ahp_weights_local: dict) -> str | None:
+                direct_key = inv_score_map.get(col, col)
+                if direct_key in ahp_weights_local:
+                    return direct_key
+                for ahp_key in ahp_weights_local.keys():
+                    mapped_col = _ranking_col_from_ahp_key(ahp_key)
+                    if mapped_col == col:
+                        return ahp_key
+                return None
 
             def weights_for_source(source: str) -> np.ndarray:
                 if source == "AHP weights":
@@ -4762,12 +5095,22 @@ def render_topsis_tab():
                         st.warning("AHP weights not found. Falling back to equal weights.")
                         return np.ones(len(selected_cols), dtype=float)
                     w = []
+                    missing_cols = []
                     for c in selected_cols:
-                        k = inv_score_map.get(c, c)
+                        k = _ahp_key_for_ranking_col(c, ahp)
                         if k not in ahp:
-                            st.warning("AHP weights do not cover all selected criteria. Falling back to equal weights.")
-                            return np.ones(len(selected_cols), dtype=float)
+                            missing_cols.append(label_by_col.get(c, c))
+                            w.append(0.0)
+                            continue
                         w.append(float(ahp[k]))
+                    if missing_cols:
+                        st.warning(
+                            "AHP weights do not cover these selected ranking criteria, so they were given 0 weight: "
+                            + ", ".join(missing_cols)
+                        )
+                    if np.array(w, dtype=float).sum() == 0:
+                        st.warning("AHP weights do not overlap the selected ranking criteria. Falling back to equal weights.")
+                        return np.ones(len(selected_cols), dtype=float)
                     return np.array(w, dtype=float)
 
                 if source == "Direct weights":

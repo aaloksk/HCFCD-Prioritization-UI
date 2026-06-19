@@ -1538,6 +1538,25 @@ if "custom_criteria_table_df" not in st.session_state:
     st.session_state["custom_criteria_table_df"] = None
 if "ahp_pairs_editor_version" not in st.session_state:
     st.session_state["ahp_pairs_editor_version"] = 0
+if "direct_weights_editor_version" not in st.session_state:
+    st.session_state["direct_weights_editor_version"] = 0
+
+
+def get_reference_hcfcd_weights_pct() -> dict[str, float]:
+    return {k: float(v) * 100.0 for k, v in config["weights"].items()}
+
+
+def reset_direct_weights_to_reference_hcfcd() -> None:
+    custom_zero_weights = {
+        item.get("key"): 0.0
+        for item in st.session_state.get("custom_criteria", [])
+        if item.get("key")
+    }
+    st.session_state["weights_pct"] = {
+        **get_reference_hcfcd_weights_pct(),
+        **custom_zero_weights,
+    }
+    st.session_state["direct_weights_editor_version"] = st.session_state.get("direct_weights_editor_version", 0) + 1
 if "app_started" not in st.session_state:
     st.session_state["app_started"] = False
 
@@ -1722,6 +1741,7 @@ def render_weights_table(context_key: str) -> None:
     meta = get_criteria_meta()
     total_w = 0.0
     st.caption("Use the +/- controls to adjust each weight. The total must equal 100.")
+    editor_version = st.session_state.get(f"{context_key}_weights_editor_version", st.session_state.get("direct_weights_editor_version", 0))
     for key, label in meta:
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -1734,7 +1754,7 @@ def render_weights_table(context_key: str) -> None:
                 value=float(st.session_state["weights_pct"].get(key, 0.0)),
                 step=0.1,
                 format="%.1f",
-                key=f"{context_key}_weight_{key}",
+                key=f"{context_key}_weight_{editor_version}_{key}",
                 label_visibility="collapsed",
             )
             st.session_state["weights_pct"][key] = round(float(val), 1)
@@ -2653,6 +2673,12 @@ def render_data_tab():
 def render_direct_weights_tab():
     st.subheader("Direct Weight Input")
     st.write("Enter weights as percentages. The total must equal 100.")
+    c_reset, _ = st.columns([1.7, 4])
+    with c_reset:
+        if st.button("Reset to Reference HCFCD Weights", key="btn_reset_direct_hcfcd_weights", use_container_width=True):
+            reset_direct_weights_to_reference_hcfcd()
+            st.success("Direct weights reset to Reference HCFCD (2022) weights.")
+            st.rerun()
     render_weights_table("direct")
     render_reference_weights_table()
 
@@ -4418,6 +4444,7 @@ def render_ahp_tab():
             st.session_state["ahp_selected_criteria"] = standard_criteria_keys
             st.session_state["ahp_importable_matrix"] = "HCFCD Parameters AHP Final.csv"
             st.session_state["ahp_matrix_criteria_source"] = "HCFCD Parameters AHP Final.csv"
+            reset_direct_weights_to_reference_hcfcd()
             st.session_state.pop("ahp_importable_loaded_sig", None)
             st.session_state["topsis_sync_from_ahp"] = True
             st.rerun()
@@ -5003,8 +5030,39 @@ def render_topsis_tab():
         edited["Criterion"] = edited["Criterion"].map(lambda c: col_by_display_label.get(c, c))
         st.session_state["topsis_settings"] = edited.to_dict("records")
 
+    project_name_options = []
+    if "project_name" in results.columns:
+        project_name_options = [
+            str(x)
+            for x in results["project_name"].dropna().astype(str).drop_duplicates().tolist()
+            if str(x).strip()
+        ]
+    excluded_project_names = st.multiselect(
+        "Exclude projects from this ranking run",
+        options=project_name_options,
+        default=[
+            x for x in st.session_state.get("ranking_excluded_project_names", [])
+            if x in project_name_options
+        ],
+        key="ranking_excluded_project_names",
+        help="Selected projects remain in the database but are not included when Run Ranking is pressed.",
+    )
+    if excluded_project_names:
+        st.caption(f"{len(excluded_project_names)} project name(s) will be excluded from the next ranking run.")
+    if st.session_state.get("ranking_exclusion_snapshot") != list(excluded_project_names):
+        st.session_state["ranking_exclusion_snapshot"] = list(excluded_project_names)
+        st.session_state.pop("topsis_results_multi", None)
+
     if st.button("Run Ranking", key="btn_run_topsis", type="primary"):
-        data = results[selected_cols].copy()
+        ranking_results = results.copy()
+        if excluded_project_names and "project_name" in ranking_results.columns:
+            exclude_mask = ranking_results["project_name"].astype(str).isin(excluded_project_names)
+            ranking_results = ranking_results.loc[~exclude_mask].copy()
+        if ranking_results.empty:
+            st.warning("All projects were excluded. Leave at least one project in the ranking run.")
+            return
+
+        data = ranking_results[selected_cols].copy()
         for c in selected_cols:
             data[c] = pd.to_numeric(data[c], errors="coerce")
         if data.isna().any().any():
@@ -5036,7 +5094,7 @@ def render_topsis_tab():
                 decision = data.to_numpy(dtype=float)
                 scores = (decision * w).sum(axis=1)
 
-                out = results.copy()
+                out = ranking_results.copy()
                 out["ranking_score"] = scores
                 out["ranking_rank"] = out["ranking_score"].rank(ascending=False, method="min").astype(int)
                 out = out.sort_values(["ranking_score", "project_name"], ascending=[False, True]).reset_index(drop=True)
@@ -5146,7 +5204,7 @@ def render_topsis_tab():
                     ideal_best=np.array(ideal_best),
                     ideal_worst=np.array(ideal_worst),
                 )
-                out = results.copy()
+                out = ranking_results.copy()
                 out["topsis_score"] = scores
                 out["topsis_rank"] = out["topsis_score"].rank(ascending=False, method="min").astype(int)
                 out = out.sort_values(["topsis_score", "project_name"], ascending=[False, True]).reset_index(drop=True)

@@ -442,13 +442,13 @@
   "uploaded_file_name": "Candidate Projects Final Database.csv",
   "custom_criteria": [],
   "weights_pct": {
-    "people_efficiency": 44.050428,
-    "structures_efficiency": 26.1037,
-    "existing_conditions": 7.728223,
-    "svi": 10.936368,
-    "maintenance": 3.264026,
-    "environment": 4.385674,
-    "multiple_benefits": 3.531581
+    "people_efficiency": 15.0,
+    "structures_efficiency": 30.0,
+    "existing_conditions": 20.0,
+    "svi": 20.0,
+    "maintenance": 5.0,
+    "environment": 5.0,
+    "multiple_benefits": 5.0
   },
   "standard_column_mapping": {},
   "project_type_source_col": "project_type",
